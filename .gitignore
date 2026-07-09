@@ -1,0 +1,18 @@
+# Binaries and build output
+/owlwatch
+/dist/
+web/dist/
+web/node_modules/
+
+# Local data
+/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Editor / OS / local tooling
+.DS_Store
+.idea/
+.vscode/
+.claude/

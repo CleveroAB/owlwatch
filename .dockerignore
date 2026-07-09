@@ -1,0 +1,23 @@
+# Build artifacts and dependencies — web/dist is rebuilt inside the image.
+web/node_modules
+web/dist
+owlwatch
+
+# Local data and databases
+data
+**/*.db*
+
+# VCS and tooling
+.git
+.gitignore
+.claude
+**/.DS_Store
+
+# Not needed inside the image
+Dockerfile
+docker-compose.yml
+DESIGN.md
+README.md
+CONTRIBUTING.md
+Makefile
+.github

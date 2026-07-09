@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>owlwatch</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='0.9em' font-size='88'%3E%F0%9F%A6%89%3C/text%3E%3C/svg%3E"
+    />
+    <script>
+      // Resolve the theme before first paint so there is no flash of the
+      // wrong theme. Precedence: ?theme= URL param (not persisted, for
+      // deep links and screenshots) > stored choice > OS preference.
+      // Dark is the canonical default.
+      (function () {
+        var param = new URLSearchParams(location.search).get('theme');
+        var stored = null;
+        try {
+          stored = localStorage.getItem('owlwatch-theme');
+        } catch (e) {
+          /* storage may be unavailable; fall through to the OS preference */
+        }
+        var theme =
+          param === 'light' || param === 'dark'
+            ? param
+            : stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark';
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
+    <style>
+      /* Page background before the bundle's CSS arrives — prevents a white flash. */
+      html {
+        background: #0d0d0d;
+      }
+      html[data-theme='light'] {
+        background: #f9f9f7;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

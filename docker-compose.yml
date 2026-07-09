@@ -1,0 +1,28 @@
+# owlwatch — the canonical way to run it.
+#
+# The read-only host mounts below are what make the metrics describe the HOST
+# rather than the container: gopsutil reads /host/proc & /host/sys (via the
+# HOST_* env vars), and disk usage is measured through the host's root
+# filesystem bind-mounted at /host/rootfs.
+services:
+  owlwatch:
+    build: .
+    container_name: owlwatch
+    ports: ["8080:8080"]
+    restart: unless-stopped
+    environment:
+      HOST_PROC: /host/proc
+      HOST_SYS: /host/sys
+      HOST_ETC: /host/etc
+      OWLWATCH_ROOTFS: /host/rootfs
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc:/host/etc:ro
+      - /:/host/rootfs:ro,rslave # rslave so host mounts added later propagate
+      - owlwatch-data:/data
+    # For NVIDIA GPUs, uncomment (requires nvidia-container-toolkit):
+    # gpus: all
+
+volumes:
+  owlwatch-data:
