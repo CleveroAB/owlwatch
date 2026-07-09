@@ -3,7 +3,7 @@
 # ---- Stage 1: frontend ------------------------------------------------------
 # Runs on the build host's native platform (fast under emulation-free buildx);
 # its output (web/dist) is platform-independent.
-FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend
+FROM --platform=$BUILDPLATFORM node:26-alpine AS frontend
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
