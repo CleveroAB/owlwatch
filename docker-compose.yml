@@ -10,9 +10,13 @@ services:
     container_name: owlwatch
     # Host port is overridable so a busy :8080 doesn't block deployment
     # (e.g. OWLWATCH_HOST_PORT=7676 in the environment or an .env file).
-    ports: ["${OWLWATCH_HOST_PORT:-8080}:8080"]
+    # OWLWATCH_PORT moves the port INSIDE the container too (rarely needed —
+    # for host-port conflicts OWLWATCH_HOST_PORT alone is enough); it is wired
+    # into both the mapping and the server env so they can't drift apart.
+    ports: ["${OWLWATCH_HOST_PORT:-8080}:${OWLWATCH_PORT:-8080}"]
     restart: unless-stopped
     environment:
+      OWLWATCH_PORT: ${OWLWATCH_PORT:-8080}
       HOST_PROC: /host/proc
       HOST_SYS: /host/sys
       HOST_ETC: /host/etc
