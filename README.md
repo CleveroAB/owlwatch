@@ -33,6 +33,11 @@ docker compose up -d --build
 
 Open <http://localhost:8080>. That's it.
 
+If host port 8080 is taken, override the published port without editing the
+file: `OWLWATCH_HOST_PORT=7676 docker compose up -d --build` (or set
+`OWLWATCH_HOST_PORT` in your platform's environment settings — Coolify,
+Portainer, etc.). The port *inside* the container stays 8080.
+
 To stamp the build with a version, pass
 `--build-arg VERSION=$(git describe --tags --always)` to `docker build`
 (compose users: add it under `build.args`).

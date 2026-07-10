@@ -8,7 +8,9 @@ services:
   owlwatch:
     build: .
     container_name: owlwatch
-    ports: ["8080:8080"]
+    # Host port is overridable so a busy :8080 doesn't block deployment
+    # (e.g. OWLWATCH_HOST_PORT=7676 in the environment or an .env file).
+    ports: ["${OWLWATCH_HOST_PORT:-8080}:8080"]
     restart: unless-stopped
     environment:
       HOST_PROC: /host/proc
