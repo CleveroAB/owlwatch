@@ -681,3 +681,43 @@ func TestHandleOverviewLiveHeartbeatResync(t *testing.T) {
 		}
 	}
 }
+
+// A hub listed in its own OWLWATCH_PEERS (e.g. via its public domain) must
+// not show the same machine twice: when a peer's HostInfo matches the local
+// hostname + boot time, the implicit "local" entry is omitted and the
+// operator-named peer represents the machine.
+func TestHandleServersLocalAliasedByPeer(t *testing.T) {
+	col := collector.New(collector.Config{SampleInterval: 250 * time.Millisecond})
+	host := col.HostInfo()
+
+	self := host // same hostname + boot time = same machine
+	fleet := &fakeFleet{servers: []metrics.ServerSummary{
+		{ID: "malevik", Name: "malevik", Online: true, Host: &self},
+		{ID: "web1", Name: "web1"},
+	}}
+	s := New(Config{Collector: col, Host: host, SampleInterval: 250 * time.Millisecond})
+	s.peers = fleet
+
+	var servers []metrics.ServerSummary
+	if err := json.Unmarshal(get(t, s, "/api/servers").Body.Bytes(), &servers); err != nil {
+		t.Fatalf("unmarshal servers: %v", err)
+	}
+	var ids []string
+	for _, sum := range servers {
+		ids = append(ids, sum.ID)
+	}
+	if got, want := strings.Join(ids, ","), "malevik,web1"; got != want {
+		t.Fatalf("server ids = %q, want %q (local hidden behind its alias)", got, want)
+	}
+
+	// A different machine (same hostname, different boot time) must NOT alias.
+	other := host
+	other.BootTime = host.BootTime - 12345
+	fleet.setHost("malevik", other, 2000)
+	if err := json.Unmarshal(get(t, s, "/api/servers").Body.Bytes(), &servers); err != nil {
+		t.Fatalf("unmarshal servers: %v", err)
+	}
+	if len(servers) != 3 || servers[0].ID != "local" {
+		t.Fatalf("expected local,malevik,web1 when boot times differ, got %d entries starting %q", len(servers), servers[0].ID)
+	}
+}

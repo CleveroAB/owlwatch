@@ -118,6 +118,10 @@ give it two extra environment variables:
 Open the hub's port and you get an overview grid with a live card per server;
 click a card for that server's full dashboard, history charts included.
 
+The hub itself may appear in its own `OWLWATCH_PEERS` (handy when one list is
+shared across the fleet): it recognizes itself — same hostname and boot time —
+and shows the machine once, under the name you gave it.
+
 Peer **names** (`web1`, `db1` above) are the display names and, lowercased,
 the server IDs: letters, digits and dashes, up to 32 characters, unique, and
 not the reserved words `local` or `overview`. Peer **URLs** must be absolute

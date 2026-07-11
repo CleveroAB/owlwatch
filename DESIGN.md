@@ -626,6 +626,10 @@ New routes (registered ALWAYS, standalone included — the UI uses only these):
   from config), then peers via `Peers.Servers()` in configured order. Every
   entry carries `recentCpu` (last ≤60 CPU usagePct values, oldest first,
   downsampled from the ring) so overview sparklines render on first paint.
+  When a configured peer IS this machine (same hostname + same boot time —
+  a hub listed in its own `OWLWATCH_PEERS`), the implicit local entry is
+  omitted and the operator-named peer represents the machine; the overview
+  stream suppresses the duplicate local snapshot events likewise.
 - `GET /api/servers/{id}/host` → HostInfo (404 unknown id; 502
   `{"error":"peer unreachable"}` if peer never seen).
 - `GET /api/servers/{id}/history?range=K` → HistoryResponse. `local` → the

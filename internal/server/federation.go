@@ -94,9 +94,32 @@ func recentCPU(snaps []metrics.Snapshot) []float64 {
 	return out
 }
 
+// localAliasedBy reports the configured peer that is this same machine, or ""
+// when none is. A hub listed in its own OWLWATCH_PEERS (say, via its public
+// domain) would otherwise show up twice; same hostname + same boot time
+// identifies "same machine" without any extra wiring. The operator-named
+// peer entry wins over the implicit "local" one.
+func (s *Server) localAliasedBy() string {
+	if s.peers == nil {
+		return ""
+	}
+	for _, sum := range s.peers.Servers() {
+		if sum.Host != nil && sum.Host.BootTime != 0 &&
+			sum.Host.Hostname == s.cfg.Host.Hostname && sum.Host.BootTime == s.cfg.Host.BootTime {
+			return sum.ID
+		}
+	}
+	return ""
+}
+
 // allServers returns the fleet: local first, then peers in configured order.
+// When a peer aliases the local machine (localAliasedBy), the local entry is
+// omitted so the fleet shows one card per machine, under the operator's name.
 func (s *Server) allServers() []metrics.ServerSummary {
-	list := []metrics.ServerSummary{s.localSummary()}
+	var list []metrics.ServerSummary
+	if s.localAliasedBy() == "" {
+		list = append(list, s.localSummary())
+	}
 	if s.peers != nil {
 		list = append(list, s.peers.Servers()...)
 	}
@@ -336,6 +359,12 @@ func (s *Server) handleOverviewLive(w http.ResponseWriter, r *http.Request) {
 		case snap, open := <-snaps:
 			if !open {
 				return
+			}
+			// When a configured peer aliases this machine, its stream carries
+			// the data — suppress the duplicate local events (the peer's own
+			// snapshots arrive via the peers channel under the peer's id).
+			if s.localAliasedBy() != "" {
+				continue
 			}
 			if st.event("snapshot", overviewSnapshotPayload{ID: "local", Snapshot: snap}) != nil {
 				return
