@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchHistory } from '../lib/api';
+import { fetchHistory, serverBase } from '../lib/api';
 import type { HistoryPoint, RangeKey } from '../lib/types';
 
 const REFRESH_MS = 60_000;
@@ -14,11 +14,13 @@ export interface HistoryState {
 }
 
 /**
- * Fetch /api/history for the given range, refetching every 60s. On range
- * change the in-flight request is aborted and the previous points are kept
- * (marked stale) so the chart can dim instead of flashing empty.
+ * Fetch one server's history for the given range, refetching every 60s. On
+ * range change the in-flight request is aborted and the previous points are
+ * kept (marked stale) so the chart can dim instead of flashing empty.
+ * Callers remount (key by server id) on server change, so a stale-points
+ * carry-over never crosses servers.
  */
-export function useHistory(range: RangeKey): HistoryState {
+export function useHistory(serverId: string, range: RangeKey): HistoryState {
   const [state, setState] = useState<HistoryState>({ points: null, stale: false, error: false });
   const ctrlRef = useRef<AbortController | null>(null);
 
@@ -30,7 +32,7 @@ export function useHistory(range: RangeKey): HistoryState {
       const ctrl = new AbortController();
       ctrlRef.current = ctrl;
       setState((s) => ({ ...s, stale: s.points !== null }));
-      fetchHistory(range, ctrl.signal)
+      fetchHistory(serverBase(serverId), range, ctrl.signal)
         .then((res) => {
           if (disposed || ctrlRef.current !== ctrl) return;
           setState({ points: res.points ?? [], stale: false, error: false });
@@ -50,7 +52,7 @@ export function useHistory(range: RangeKey): HistoryState {
       window.clearInterval(timer);
       ctrlRef.current?.abort();
     };
-  }, [range]);
+  }, [serverId, range]);
 
   return state;
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/CleveroAB/owlwatch/internal/collector"
 	"github.com/CleveroAB/owlwatch/internal/metrics"
+	"github.com/CleveroAB/owlwatch/internal/peers"
 	"github.com/CleveroAB/owlwatch/internal/store"
 )
 
@@ -26,11 +27,14 @@ type Config struct {
 	Host           metrics.HostInfo // Version already filled in
 	SampleInterval time.Duration    // collector cadence: hello intervalMs and the healthz staleness bound
 	AllowedHosts   []string         // OWLWATCH_ALLOWED_HOSTS: extra Host header names accepted by withHostCheck
+	Peers          *peers.Client    // OWLWATCH_PEERS hub state (DESIGN.md §9); nil = standalone
+	Token          string           // OWLWATCH_TOKEN: required on /api/ routes when non-empty
 }
 
-// Server serves the JSON API, the SSE live stream and the embedded UI.
+// Server serves the JSON API, the SSE live streams and the embedded UI.
 type Server struct {
 	cfg     Config
+	peers   peerSource // cfg.Peers behind the internal test seam; nil when standalone
 	handler http.Handler
 }
 
@@ -41,27 +45,45 @@ func New(cfg Config) *Server {
 		cfg.Host.GPUNames = []string{}
 	}
 	s := &Server{cfg: cfg}
+	if cfg.Peers != nil {
+		// Only assign a non-nil client: a nil *peers.Client wrapped in a
+		// non-nil interface would defeat the s.peers == nil standalone checks.
+		s.peers = cfg.Peers
+	}
 
 	mux := http.NewServeMux()
+	// Fleet API (DESIGN.md §9.4), registered even when standalone — the UI
+	// consumes only this surface.
+	mux.HandleFunc("GET /api/servers", s.handleServers)
+	mux.HandleFunc("GET /api/servers/{id}/host", s.handleServerHost)
+	mux.HandleFunc("GET /api/servers/{id}/history", s.handleServerHistory)
+	mux.HandleFunc("GET /api/servers/{id}/live", s.handleServerLive)
+	mux.HandleFunc("GET /api/overview/live", s.handleOverviewLive)
+	// Legacy aliases for the local server. This surface is frozen: it is
+	// what a hub consumes on its peers (DESIGN.md §4).
 	mux.HandleFunc("GET /api/host", s.handleHost)
 	mux.HandleFunc("GET /api/live", s.handleLive)
 	mux.HandleFunc("GET /api/history", s.handleHistory)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.Handle("/", newUIHandler())
 
-	s.handler = withLogging(withRecovery(withHostCheck(cfg.AllowedHosts, mux)))
+	// Token auth sits inside the host check so a rebound Host is answered
+	// with 421 before it can even probe whether auth is on.
+	s.handler = withLogging(withRecovery(withHostCheck(cfg.AllowedHosts,
+		withTokenAuth(cfg.Token, mux))))
 	return s
 }
 
 // ListenAndServe serves until ctx is cancelled, then shuts down gracefully.
 //
-// ReadTimeout and WriteTimeout are deliberately zero: /api/live holds a
-// response open indefinitely. A non-zero WriteTimeout would cut every SSE
-// stream after a fixed interval, and a non-zero ReadTimeout arms a
-// whole-connection read deadline that net/http's background read trips
-// mid-stream, cancelling the request context. Slow-loris protection comes
-// from ReadHeaderTimeout instead, and dead or stalled SSE peers are reaped by
-// the per-write deadlines handleLive arms through http.ResponseController.
+// ReadTimeout and WriteTimeout are deliberately zero: the SSE routes
+// (/api/live, /api/servers/{id}/live, /api/overview/live) hold a response
+// open indefinitely. A non-zero WriteTimeout would cut every SSE stream
+// after a fixed interval, and a non-zero ReadTimeout arms a whole-connection
+// read deadline that net/http's background read trips mid-stream, cancelling
+// the request context. Slow-loris protection comes from ReadHeaderTimeout
+// instead, and dead or stalled SSE peers are reaped by the per-write
+// deadlines sseStream arms through http.ResponseController.
 // BaseContext derives every request context from ctx,
 // so cancelling ctx ends all in-flight SSE streams and lets Shutdown drain
 // promptly.

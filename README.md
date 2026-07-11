@@ -14,12 +14,15 @@ to 30 days). No agents, no external database, no config files.
 [light theme](docs/screenshot-light.png).*
 
 > [!WARNING]
-> **owlwatch has no authentication and no TLS.** Anyone who can reach the port
-> can see everything the dashboard shows. Run it on a trusted LAN, over a VPN
-> such as Tailscale, or behind a reverse proxy that handles auth (nginx or
-> Caddy basic auth work fine). Do not expose it directly to the internet.
-> It is read-only — metrics out, nothing in — but treat host telemetry as
-> sensitive anyway.
+> **owlwatch has no TLS, and no authentication unless you set
+> `OWLWATCH_TOKEN`** (see
+> [Monitoring multiple servers](#monitoring-multiple-servers-federation)).
+> Without a token, anyone who can reach the port can see everything the
+> dashboard shows; with one, the token still travels in plain text. Run it on
+> a trusted LAN, over a VPN such as Tailscale, or behind a reverse proxy that
+> terminates TLS (nginx or Caddy work fine). Do not expose it directly to the
+> internet. It is read-only — metrics out, nothing in — but treat host
+> telemetry as sensitive anyway.
 
 ## Quick start
 
@@ -87,6 +90,74 @@ Host monitoring from a container works on **Linux hosts**. On Docker Desktop
 (macOS/Windows) you'll be watching Docker's Linux VM, not your machine — run
 the binary natively instead (see [Local development](#local-development)).
 
+## Monitoring multiple servers (federation)
+
+One owlwatch can watch many. Every instance runs the **same image** and stays
+a fully working standalone dashboard; setting `OWLWATCH_PEERS` on one of them
+turns it into a **hub** that connects to each peer's normal API and serves an
+overview of the whole fleet plus a full per-server dashboard.
+
+![owlwatch fleet overview](docs/screenshot-overview.png) Peers need no
+new configuration, and there is no central metric storage — history stays on
+each server (the hub proxies history queries on demand), so a hub restart
+loses nothing.
+
+### Example: two servers plus a hub
+
+Deploy owlwatch on each machine exactly as in the quick start. Then pick one
+instance as the hub — one of the monitored servers or a third machine — and
+give it two extra environment variables:
+
+```yaml
+    environment:
+      # ...the quick-start variables, plus:
+      OWLWATCH_PEERS: web1=http://10.0.0.11:8080,db1=http://10.0.0.12:8080
+      OWLWATCH_TOKEN: <shared>   # same value on web1 and db1 — see below
+```
+
+Open the hub's port and you get an overview grid with a live card per server;
+click a card for that server's full dashboard, history charts included.
+
+Peer **names** (`web1`, `db1` above) are the display names and, lowercased,
+the server IDs: letters, digits and dashes, up to 32 characters, unique, and
+not the reserved words `local` or `overview`. Peer **URLs** must be absolute
+`http`/`https` with no path (redirects are not followed). An invalid
+`OWLWATCH_PEERS` is a fatal startup error rather than a silently ignored one.
+
+### Access tokens
+
+Set the **same** `OWLWATCH_TOKEN` on every instance, hub and peers alike.
+When it is set:
+
+- every `/api/*` route requires the token — as `Authorization: Bearer
+  <token>` or as a `?token=<token>` query parameter — and answers `401`
+  without it;
+- the hub authenticates to its peers with it automatically;
+- the dashboard asks you for the token once (it is kept in the browser's
+  localStorage and attached to every request);
+- `/healthz` is not under `/api` and stays open, so the Docker `HEALTHCHECK`
+  keeps working. The static UI shell is also public — the pages load, the
+  data behind them doesn't.
+
+If one peer needs a different token, append it per peer with
+`name=url|token`:
+
+```
+OWLWATCH_PEERS=web1=http://10.0.0.11:8080,db1=http://10.0.0.12:8080|other-secret
+```
+
+A token protects the API but is no substitute for TLS — the warning at the
+top of this README still applies.
+
+### Coolify (and similar platforms)
+
+Deploy the same owlwatch resource on every server. On the instance you pick
+as the hub, add the two environment variables from the example above. And
+since the hub is typically reached through a domain name, remember to set
+`OWLWATCH_ALLOWED_HOSTS` to that domain (see
+[Configuration](#configuration)) — unknown Host headers are rejected
+with `421`.
+
 ## GPU support (NVIDIA only in v1)
 
 owlwatch reads GPU utilization, VRAM, temperature and power by polling
@@ -114,6 +185,8 @@ Everything is environment variables; the defaults are sensible.
 | `OWLWATCH_RETENTION_DAYS` | `30` | history retention (pruned hourly) |
 | `OWLWATCH_ROOTFS` | *(empty)* | container mode: path where the host `/` is bind-mounted (e.g. `/host/rootfs`); empty = native mode |
 | `OWLWATCH_ALLOWED_HOSTS` | *(empty)* | extra Host-header names to accept (comma-separated). IP-literal hosts and `localhost` are always accepted; other names are rejected with 421 to block DNS rebinding |
+| `OWLWATCH_PEERS` | *(empty)* | comma-separated `name=url` pairs, e.g. `web1=http://10.0.0.11:8080,db1=https://db.example.com\|s3cret`. An optional `\|token` suffix per peer overrides `OWLWATCH_TOKEN` for that peer's outgoing requests. Setting this makes the instance a [hub](#monitoring-multiple-servers-federation) |
+| `OWLWATCH_TOKEN` | *(empty)* | when set, every `/api/*` route requires `Authorization: Bearer <token>` or `?token=<token>` (`/healthz` is not under `/api` and stays open). Also used as the default outgoing token for peers |
 | `HOST_PROC`, `HOST_SYS`, `HOST_ETC`, `HOST_VAR`, `HOST_RUN` | *(unset)* | standard [gopsutil](https://github.com/shirou/gopsutil) redirects; docker-compose sets the first three |
 
 ### URL parameters
@@ -156,16 +229,26 @@ on macOS works — there's just no GPU section.
 
 ## API
 
-Four endpoints, all JSON. The exact shapes live in
-[`internal/metrics/types.go`](internal/metrics/types.go) and its mirror
-[`web/src/lib/types.ts`](web/src/lib/types.ts).
+All JSON. The exact shapes live in
+[`internal/metrics/types.go`](internal/metrics/types.go) and
+[`internal/metrics/federation.go`](internal/metrics/federation.go), with
+their mirror in [`web/src/lib/types.ts`](web/src/lib/types.ts). When
+`OWLWATCH_TOKEN` is set, every `/api/*` route requires the token
+(`Authorization: Bearer` or `?token=`) — `/healthz` never does.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/host` | static host identity: hostname, platform, kernel, CPU model, cores, total memory, boot time, GPU names, owlwatch version |
-| `GET /api/live` | SSE stream — one `hello` event on connect (`{host, recent, intervalMs}` with the last ~5 min of samples and the sample interval), then a `snapshot` event every 2 s; comment heartbeat every 15 s |
-| `GET /api/history?range=1h\|6h\|24h\|7d\|30d` | `{range, points}` — server-side bucketed aggregates (≤ ~400 points per response); unknown range → `400 {"error": "..."}` |
+| `GET /api/servers` | `ServerSummary[]` — every monitored server: the local one first (id `local`), then peers in configured order, each with id, name, online status, last-seen time and latest sample |
+| `GET /api/servers/{id}/host` | static host identity: hostname, platform, kernel, CPU model, cores, total memory, boot time, GPU names, owlwatch version. `404` unknown id, `502` if the peer has never been reached |
+| `GET /api/servers/{id}/live` | SSE stream — one `hello` event on connect (`{host, recent, intervalMs}` with the last ~5 min of samples and the sample interval), then a `snapshot` event per sample (every 2 s by default); comment heartbeat every 15 s |
+| `GET /api/servers/{id}/history?range=1h\|6h\|24h\|7d\|30d` | `{range, points}` — server-side bucketed aggregates (≤ ~400 points per response); proxied from the peer for peer ids. Unknown range → `400`, unknown id → `404`, unreachable peer → `502` |
+| `GET /api/overview/live` | SSE stream for the whole fleet — a `servers` event on connect (full `ServerSummary[]`), then `snapshot` events (`{id, snapshot}`) for every server and `status` events (`{id, online, lastSeen}`) on peer transitions |
 | `GET /healthz` | `200 ok` while the latest sample is fresh (within 5× the sample interval), `503` before the first sample or when sampling has stalled; drives the Docker `HEALTHCHECK` |
+
+The unprefixed v1 endpoints — `GET /api/host`, `GET /api/live`,
+`GET /api/history` — remain as aliases for the local server. That alias
+surface is what a hub consumes on its peers, so it is frozen: older and newer
+instances federate cleanly.
 
 ## Architecture
 

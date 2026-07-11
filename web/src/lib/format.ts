@@ -66,6 +66,25 @@ export function truncateMountPath(path: string, max = 28): string {
   return `…${tail.slice(-(max - 1))}`;
 }
 
+/**
+ * Relative "ago" label for overview cards: "just now", "4m ago",
+ * "3h 12m ago", "5d ago". `ts` is unix ms.
+ */
+export function formatAgo(ts: number, now: number = Date.now()): string {
+  const s = Math.max(0, Math.floor((now - ts) / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${pad2(m % 60)}m ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+/** Wall-clock "14:32" for the offline-peer "last data" notice. `ts` is unix ms. */
+export function formatClock(ts: number): string {
+  return hm(new Date(ts));
+}
+
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 

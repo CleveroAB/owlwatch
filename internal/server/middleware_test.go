@@ -3,8 +3,11 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/CleveroAB/owlwatch/internal/collector"
 )
 
 func TestHostAllowed(t *testing.T) {
@@ -59,6 +62,72 @@ func TestWithHostCheck(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("IP-literal host: status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+}
+
+// Token auth (DESIGN.md §9.2): every /api/ route requires the token — as a
+// Bearer header or a ?token= query param — while /healthz and the UI stay
+// open, and an empty configured token disables the check entirely.
+func TestWithTokenAuth(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	tests := []struct {
+		name   string
+		token  string // configured token; "" disables the check
+		target string // path (plus optional query) requested
+		header string // Authorization header value; "" = none
+		want   int
+	}{
+		{"no token configured", "", "/api/host", "", http.StatusNoContent},
+		{"api without token", "s3cret", "/api/host", "", http.StatusUnauthorized},
+		{"bare /api gated too", "s3cret", "/api", "", http.StatusUnauthorized},
+		{"unknown api path gated", "s3cret", "/api/nope", "", http.StatusUnauthorized},
+		{"valid bearer", "s3cret", "/api/host", "Bearer s3cret", http.StatusNoContent},
+		{"wrong bearer", "s3cret", "/api/host", "Bearer nope", http.StatusUnauthorized},
+		{"missing Bearer prefix", "s3cret", "/api/host", "s3cret", http.StatusUnauthorized},
+		{"token as bearer prefix only", "s3cret", "/api/host", "Bearer s3cr", http.StatusUnauthorized},
+		{"valid query token", "s3cret", "/api/servers/db1/live?token=s3cret", "", http.StatusNoContent},
+		{"wrong query token", "s3cret", "/api/live?token=nope", "", http.StatusUnauthorized},
+		{"wrong bearer, valid query", "s3cret", "/api/live?token=s3cret", "Bearer nope", http.StatusNoContent},
+		{"healthz stays open", "s3cret", "/healthz", "", http.StatusNoContent},
+		{"ui shell stays open", "s3cret", "/", "", http.StatusNoContent},
+		{"ui assets stay open", "s3cret", "/assets/index-abc123.js", "", http.StatusNoContent},
+		{"prefix must be /api/", "s3cret", "/apifoo", "", http.StatusNoContent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.target, nil)
+			if tt.header != "" {
+				req.Header.Set("Authorization", tt.header)
+			}
+			rec := httptest.NewRecorder()
+			withTokenAuth(tt.token, next).ServeHTTP(rec, req)
+			if rec.Code != tt.want {
+				t.Errorf("status = %d, want %d", rec.Code, tt.want)
+			}
+			if tt.want == http.StatusUnauthorized {
+				if body := strings.TrimSpace(rec.Body.String()); body != `{"error":"unauthorized"}` {
+					t.Errorf("body = %q, want the unauthorized JSON error", body)
+				}
+			}
+		})
+	}
+}
+
+// The token check sits inside the host check: a rebound Host must get 421,
+// not 401, so a hostile page cannot even probe whether auth is enabled.
+func TestHostCheckWinsOverTokenAuth(t *testing.T) {
+	col := collector.New(collector.Config{SampleInterval: time.Second})
+	s := New(Config{Collector: col, SampleInterval: time.Second, Token: "s3cret"})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/host", nil)
+	req.Host = "attacker.example"
+	rec := httptest.NewRecorder()
+	s.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMisdirectedRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusMisdirectedRequest)
 	}
 }
 

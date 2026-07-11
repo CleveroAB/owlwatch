@@ -21,6 +21,12 @@ services:
       HOST_SYS: /host/sys
       HOST_ETC: /host/etc
       OWLWATCH_ROOTFS: /host/rootfs
+      # To monitor several servers, deploy this same compose file on each one
+      # and make ONE instance the hub by uncommenting these (see README,
+      # "Monitoring multiple servers"). Set the same OWLWATCH_TOKEN on every
+      # instance:
+      # OWLWATCH_PEERS: web1=http://10.0.0.11:8080,db1=http://10.0.0.12:8080
+      # OWLWATCH_TOKEN: change-me
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro

@@ -10,6 +10,8 @@ const PCT_TICKS = [0, 25, 50, 75, 100];
 const pctTick = (v: number) => String(v);
 
 interface HistorySectionProps {
+  /** Scopes the sticky mount→hue assignment (multi-server hubs). */
+  serverId: string;
   points: HistoryPoint[] | null;
   stale: boolean;
   error: boolean;
@@ -23,6 +25,7 @@ interface HistorySectionProps {
  * whole chart grid every 2s.
  */
 export const HistorySection = memo(function HistorySection({
+  serverId,
   points,
   stale,
   error,
@@ -115,15 +118,15 @@ export const HistorySection = memo(function HistorySection({
       for (const m of Object.keys(p.disks ?? {})) mounts.add(m);
     }
     const sorted = [...mounts].sort();
-    registerMounts(sorted);
+    registerMounts(serverId, sorted);
     return sorted.slice(0, 8).map((mount) => ({
       id: mount,
       name: mount,
-      color: mountColor(mount),
+      color: mountColor(serverId, mount),
       values: pts.map((p) => p.disks?.[mount] ?? null),
       format: formatPct,
     }));
-  }, [pts]);
+  }, [serverId, pts]);
 
   return (
     <div className="charts">

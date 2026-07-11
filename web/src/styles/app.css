@@ -462,6 +462,189 @@ table.data {
   border-bottom: none;
 }
 
+/* ---------- hub header extras (server pages on a hub only) ---------- */
+
+.back-link {
+  font-size: 13px;
+  color: var(--ink-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.back-link:hover {
+  color: var(--ink);
+}
+
+/* Native select styled like the chip. */
+.server-select {
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  max-width: 180px;
+  cursor: pointer;
+}
+
+.server-select:hover {
+  color: var(--ink);
+}
+
+/* ---------- overview (hub) ---------- */
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.server-card {
+  display: block;
+  padding: 16px 18px;
+  color: inherit;
+  text-decoration: none;
+  min-width: 0;
+}
+
+.server-card:hover {
+  border-color: color-mix(in srgb, var(--ink) 25%, transparent);
+}
+
+/* Dim, don't hide: offline cards keep their last-known values. */
+.server-card.offline {
+  opacity: 0.6;
+}
+
+.server-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.server-card-head .conn {
+  font-size: 12px;
+}
+
+.server-name {
+  font-weight: 600;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-card-meta {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 2px;
+}
+
+.card-meters {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 7px 10px;
+  align-items: center;
+  margin: 12px 0 4px;
+}
+
+.card-meters .meter {
+  margin-top: 0;
+}
+
+.cm-label {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.cm-val {
+  font-size: 12px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums; /* a column of values — keep them aligned */
+  text-align: right;
+  min-width: 44px;
+}
+
+/* ---------- offline-peer notice above the charts ---------- */
+
+.chart-notice {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--ink-2);
+  margin: 0 0 14px;
+}
+
+/* ---------- token gate ---------- */
+
+.gate {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.gate-card {
+  width: 320px;
+  max-width: 100%;
+  padding: 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
+.gate-mark {
+  font-size: 36px;
+  line-height: 1;
+}
+
+.gate-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.gate-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.gate-input {
+  font: inherit;
+  color: var(--ink);
+  background: var(--page);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.gate-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  color: var(--ink);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gate-btn:hover {
+  background: color-mix(in srgb, var(--ink) 15%, transparent);
+}
+
+.gate-error {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--status-critical);
+}
+
 /* ---------- footer ---------- */
 
 .site-footer {

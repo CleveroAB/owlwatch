@@ -51,6 +51,9 @@ to 8080.
 - `gofmt` your Go code (CI fails on unformatted files) and make sure
   `make test` passes.
 - If your change alters any HTTP/SSE contract, config variable, or the shared
-  data types (`internal/metrics/types.go` / `web/src/lib/types.ts`), update
-  `DESIGN.md` in the same PR — it must stay in sync with the code.
+  data types (`internal/metrics/types.go`, `internal/metrics/federation.go` /
+  `web/src/lib/types.ts`), update `DESIGN.md` in the same PR — it must stay
+  in sync with the code. The unprefixed `/api/host`, `/api/live` and
+  `/api/history` aliases are the peer-facing surface hubs consume — frozen,
+  do not change them.
 - Keep PRs focused; small and reviewable beats big and clever.

@@ -1,22 +1,36 @@
 import { useEffect, useReducer } from 'react';
 import type { ConnectionState } from '../lib/api';
 import { formatUptime } from '../lib/format';
-import type { HostInfo } from '../lib/types';
+import type { HostInfo, ServerSummary } from '../lib/types';
 import type { Theme } from '../hooks/useTheme';
+
+/** Hub-mode extras for a server page: back link + server switcher (§9.5). */
+export interface HubNav {
+  servers: ServerSummary[];
+  currentId: string;
+}
 
 export function Header({
   host,
   status,
   theme,
   onToggleTheme,
+  hubNav,
 }: {
   host: HostInfo | null;
   status: ConnectionState;
   theme: Theme;
   onToggleTheme: () => void;
+  /** Present only on a hub's server pages — standalone renders exactly as v1. */
+  hubNav?: HubNav;
 }) {
   return (
     <header className="site-header">
+      {hubNav && (
+        <a className="back-link" href="#/">
+          ← Overview
+        </a>
+      )}
       <div className="brand">
         <span className="brand-mark" aria-hidden="true">
           🦉
@@ -36,6 +50,22 @@ export function Header({
             up <Uptime bootTime={host.bootTime} />
           </span>
         </>
+      )}
+      {hubNav && (
+        <select
+          className="server-select"
+          aria-label="Switch server"
+          value={hubNav.currentId}
+          onChange={(e) => {
+            window.location.hash = `#/s/${encodeURIComponent(e.target.value)}`;
+          }}
+        >
+          {hubNav.servers.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
       )}
       <div className="spacer" />
       <ConnStatus status={status} />

@@ -56,6 +56,8 @@ Repository layout:
 | `OWLWATCH_RETENTION_DAYS` | `30` | history retention |
 | `OWLWATCH_ROOTFS` | *(empty)* | container mode: host `/` bind-mounted here (e.g. `/host/rootfs`) |
 | `OWLWATCH_ALLOWED_HOSTS` | *(empty)* | extra Host-header names to accept (comma-separated). IP-literal hosts and `localhost` are always accepted; other names are rejected with 421 to block DNS rebinding |
+| `OWLWATCH_PEERS` | *(empty)* | federation: `name=url[\|token]` pairs — makes this instance a hub (§9) |
+| `OWLWATCH_TOKEN` | *(empty)* | require a bearer/query token on all `/api/*` routes; also the default outgoing peer token (§9) |
 | `HOST_PROC`, `HOST_SYS`, `HOST_ETC`, `HOST_VAR`, `HOST_RUN` | *(unset)* | standard gopsutil redirects; set by docker-compose to `/host/proc` etc. |
 
 Config parsing lives in `cmd/owlwatch/main.go` (plain `os.Getenv` + defaults,
@@ -257,10 +259,14 @@ Routes (stdlib `http.ServeMux`, Go 1.22 patterns; no router dependency):
 
 ## 4. HTTP/SSE contract summary
 
-Everything the UI consumes, in one place: `GET /api/host` (HostInfo),
-`GET /api/live` (SSE: one `hello`, then `snapshot` every 2s),
-`GET /api/history?range=K` (HistoryResponse). Types exactly as in
-`web/src/lib/types.ts`.
+Everything the UI consumes, in one place: `GET /api/servers`
+(ServerSummary[]), `GET /api/servers/{id}/host` (HostInfo),
+`GET /api/servers/{id}/live` (SSE: one `hello`, then `snapshot` per tick),
+`GET /api/servers/{id}/history?range=K` (HistoryResponse), and
+`GET /api/overview/live` (fleet SSE mux, §9.4). The legacy unprefixed
+`/api/host`, `/api/live`, `/api/history` remain as aliases for the local
+server — that alias surface is what hubs consume on peers, so it is frozen.
+Types exactly as in `web/src/lib/types.ts`.
 
 ## 5. Frontend spec
 
@@ -508,8 +514,195 @@ sells and operates it.
   `go:embed` needs it — then the Go binary); `make run` builds and runs it.
 - Production check: `cd web && npm run build && cd .. && go build ./... && ./owlwatch`.
 
-## 8. Non-goals for v1 (do not build)
+## 8. Non-goals (do not build)
 
-Network I/O metrics, per-process lists, alerts/notifications, auth, multi-host
-agents, AMD/Intel/Apple GPU support (NVIDIA only), historical per-core CPU,
-config files. The GPU history aggregates across cards (per-GPU history is v2).
+Network I/O metrics, per-process lists, alerts/notifications, AMD/Intel/Apple
+GPU support (NVIDIA only), historical per-core CPU, config files. The GPU
+history aggregates across cards (per-GPU history is future work). Multi-host
+monitoring and token auth were non-goals for v1.0 and were added in v1.1 as
+federation — see §9.
+
+## 9. Federation (v1.1): hub mode, multiple servers, token auth
+
+Every instance runs the same binary and remains a fully working standalone
+dashboard. An instance becomes a **hub** when `OWLWATCH_PEERS` is set: it
+connects to each peer's existing API, aggregates live state, and serves an
+overview UI plus per-server dashboards. Peers need no new configuration —
+the peer-facing surface is exactly the v1 API. There is no central metric
+storage: history stays on each peer and the hub proxies range queries.
+
+### 9.1 Configuration (new env vars, parsed in cmd/owlwatch/main.go)
+
+| Var | Default | Meaning |
+|---|---|---|
+| `OWLWATCH_PEERS` | *(empty)* | comma-separated `name=url` pairs, e.g. `web1=http://10.0.0.11:8080,db1=https://db.example.com\|s3cret`. An optional `\|token` suffix per peer overrides `OWLWATCH_TOKEN` for that peer's outgoing requests. Setting this makes the instance a hub. |
+| `OWLWATCH_TOKEN` | *(empty)* | when set, every `/api/*` route (except nothing under /api; `/healthz` is NOT under /api and stays open) requires `Authorization: Bearer <token>` or `?token=<token>`. Also used as the default outgoing token for peers. |
+
+Peer **names** become server IDs: lowercased, must match `[a-z0-9-]{1,32}`
+after lowering, must be unique, and must not be the reserved words `local` or
+`overview`. Peer **URLs** must be absolute http/https, no path/query/fragment
+(trailing `/` stripped); redirects are NOT followed (fail the request).
+Invalid `OWLWATCH_PEERS` is a fatal startup error — fail fast, not silently.
+
+### 9.2 Auth semantics
+
+- Token check: constant-time compare (`crypto/subtle`). Accepted as
+  `Authorization: Bearer <t>` or query param `token=<t>` (EventSource cannot
+  set headers). 401 JSON `{"error":"unauthorized"}` on failure.
+- Applies to ALL `/api/` routes when `OWLWATCH_TOKEN` is set. `/healthz` and
+  the static UI stay open (the UI shell is public; the data behind it is not).
+- The UI handles 401 with a token gate (see §9.5); the token the user enters
+  is kept in localStorage (`owlwatch-token`) and attached to every request.
+- Hub→peer requests always send the peer's token (per-peer override or the
+  hub's own `OWLWATCH_TOKEN`) as `Authorization: Bearer`.
+- The `-healthcheck` flag hits `/healthz` — unaffected by tokens.
+
+### 9.3 `internal/peers` package (new)
+
+```go
+type Peer struct {
+    ID    string   // slug, validated per §9.1
+    Name  string   // display name (the configured name, original casing)
+    URL   *url.URL // base URL, no trailing slash
+    Token string   // outgoing bearer token ("" = none)
+}
+
+// ParsePeers parses OWLWATCH_PEERS; defaultToken fills Peer.Token when a
+// peer has no |token override. Returns nil, nil for empty input.
+func ParsePeers(env, defaultToken string) ([]Peer, error)
+
+type Event struct {
+    ID       string            // server id
+    Snapshot *metrics.Snapshot // non-nil for snapshot events
+    Online   *bool             // non-nil for status transitions
+    LastSeen int64             // unix ms
+}
+
+func NewClient(peers []Peer) *Client
+func (c *Client) Run(ctx context.Context) // blocks; one goroutine per peer
+
+// Snapshot of current fleet state, peers only, in configured order.
+func (c *Client) Servers() []metrics.ServerSummary
+// Muxed events for all peers; non-blocking broadcast (slow subscribers drop).
+func (c *Client) Subscribe() (<-chan Event, func())
+// Per-peer accessors; ok=false for unknown id.
+func (c *Client) HostInfo(id string) (metrics.HostInfo, bool)
+func (c *Client) Recent(id string) []metrics.Snapshot // ring, oldest first, cap 150
+func (c *Client) IntervalMs(id string) int64
+// History proxies GET <peer>/api/history?range=K with a 15s timeout.
+func (c *Client) History(ctx context.Context, id, rangeKey string) ([]metrics.HistoryPoint, error)
+var ErrUnknownPeer, ErrPeerUnavailable error // History sentinels
+```
+
+Behavior requirements:
+
+- Per peer, `Run` maintains one SSE connection to `<url>/api/live`
+  (`Accept: text/event-stream`, bearer token). Minimal SSE parsing (event/data
+  lines, ignore `:` comments — but any received bytes, including comments,
+  reset the stall timer). Stall timer: no bytes for 45s → reconnect.
+- `hello` → cache HostInfo + intervalMs, seed the ring from `recent`.
+  `snapshot` → update latest + ring, broadcast Event with Snapshot.
+- Connect success → broadcast `Online: true`; any disconnect/error →
+  `Online: false`, then retry with exponential backoff 2s→30s (jitter).
+- One shared `http.Client` with `CheckRedirect` returning an error; separate
+  timeout discipline: no overall timeout on the SSE request (streaming), 15s
+  timeout on history proxying.
+- All state guarded by a mutex; broadcast must never block a peer goroutine
+  (same drop pattern as the collector).
+- Unit tests with an httptest SSE server: hello+snapshot flow, ring seeding,
+  reconnect after server close, offline event, token header sent, redirect
+  refused, ParsePeers table (dupes, bad slug, reserved, bad URL, token
+  override).
+
+### 9.4 Server changes (`internal/server`, `cmd/owlwatch/main.go`)
+
+`server.Config` gains `Peers *peers.Client` (nil when standalone) and
+`Token string`.
+
+New routes (registered ALWAYS, standalone included — the UI uses only these):
+
+- `GET /api/servers` → `[]metrics.ServerSummary`: local first (ID "local",
+  Name = hostname, Online true, Latest/LastSeen from collector, IntervalMs
+  from config), then peers via `Peers.Servers()` in configured order. Every
+  entry carries `recentCpu` (last ≤60 CPU usagePct values, oldest first,
+  downsampled from the ring) so overview sparklines render on first paint.
+- `GET /api/servers/{id}/host` → HostInfo (404 unknown id; 502
+  `{"error":"peer unreachable"}` if peer never seen).
+- `GET /api/servers/{id}/history?range=K` → HistoryResponse. `local` → the
+  existing store query path; peers → `Peers.History` (400 bad range as today;
+  502 on ErrPeerUnavailable; 404 on ErrUnknownPeer).
+- `GET /api/servers/{id}/live` → SSE, EXACTLY the v1 wire format (hello with
+  {host, recent, intervalMs}, then snapshot events, 15s heartbeats, per-write
+  deadlines). For `local` it's the existing stream; for a peer it is served
+  from the hub's cached state + a `Peers.Subscribe()` filtered to that id —
+  the hub NEVER opens a second upstream connection per viewer. Peer streams
+  additionally forward upstream reachability as `status` events
+  (`{"online":bool,"lastSeen":ms}`): every transition is forwarded, and a
+  viewer connecting while the peer is offline gets the cached hello followed
+  immediately by `status {online:false, lastSeen}` — a dashboard must never
+  show a dead peer as live.
+- `GET /api/overview/live` → SSE mux for the whole fleet:
+  - on connect: `event: servers` / `data: []ServerSummary` (full state)
+  - then: `event: snapshot` / `data: {"id":"...","snapshot":{...}}` for every
+    server including local, and `event: status` / `data:
+    {"id":"...","online":bool,"lastSeen":ms}` on peer transitions
+  - the full `servers` event is RE-SENT on every peer online/offline
+    transition and on each heartbeat tick (level-triggered resync: a late
+    peer hello, or a status event dropped by the non-blocking broadcast,
+    heals within one cycle; the client merges by replacing)
+  - heartbeats + write deadlines as everywhere else.
+- Legacy `/api/host`, `/api/live`, `/api/history` remain as aliases for the
+  local server (peer compatibility — a hub can itself be someone's peer).
+- Auth middleware per §9.2 wraps all `/api/` routes when Token is set.
+
+`main.go`: parse the two new env vars, `peers.ParsePeers`, start
+`peersClient.Run` in the errgroup/WaitGroup alongside the collector, pass to
+server.Config. Startup log line gains `peers: N` and `auth: on/off`.
+
+### 9.5 UI changes (web/)
+
+Routing is hash-based (no router dependency, SPA fallback untouched):
+`#/` = overview (or the single-server dashboard when standalone), `#/s/{id}` =
+that server's full dashboard.
+
+- On boot fetch `/api/servers`. 401 → **token gate**: a centered card (owl
+  mark, one password input "Access token", save button); stores to
+  localStorage `owlwatch-token`, retries. Every fetch sends
+  `Authorization: Bearer`; EventSource URLs get `?token=`.
+- **Standalone invariant:** when `/api/servers` returns exactly one local
+  entry, the app renders the v1 dashboard EXACTLY as today — no overview, no
+  picker, no visual change. This must remain pixel-identical.
+- **Overview page** (hub, default route): a responsive grid of server cards.
+  Card = server name (+ hostname chip when it differs), status (green dot
+  "Live" / amber "Unreachable" with relative time, icon + label, never color
+  alone), uptime, compact one-line meters for CPU / Mem / Disk(fullest) /
+  GPU-if-present with current values, and a 60-point CPU sparkline that
+  accumulates from the live stream. Data: one `/api/overview/live`
+  EventSource for the whole page. Clicking a card → `#/s/{id}`. Offline cards
+  dim to 60% with their last-known values and show since-when.
+- **Server page**: the existing v1 dashboard componentry, parameterized by
+  server id — all data via `/api/servers/{id}/...`. Header gains (hub only):
+  a back-to-overview link (`← Overview`) and a server dropdown (native
+  `<select>` styled like the chip) for direct switching. Offline peer: the
+  existing amber "Reconnecting…" state plus an inline notice on the charts
+  ("last data HH:MM").
+- api.ts: one place builds request init/URLs (token injection); connectLive
+  gains a basePath parameter; new fetchServers + connectOverview with the
+  same reconnect/stall discipline as connectLive.
+- Design language: unchanged tokens, tiles and type scale; the overview card
+  is a `card` with the same radius/border; meters reuse `Meter`; no new
+  colors (status colors only per the existing rules).
+
+### 9.6 Failure semantics (pin these — tests assert them)
+
+- Unknown server id: 404 `{"error":"unknown server"}` on any /api/servers/{id}/*.
+- Peer configured but never reached: `/host` 502, `/history` 502, `/live`
+  hello carries `"recent": []` and whatever HostInfo is cached (or the
+  connection waits for data — hello sends immediately with nulls? NO:
+  hello requires host; if no HostInfo cached yet the live handler sends
+  `event: status` `{"online":false}` first and hello follows once the peer
+  connects. The overview stream is the primary consumer for not-yet-seen
+  peers; the server page shows the reconnecting state).
+- Hub restart: peers' history is intact (it lives on the peers); overview
+  repopulates within one peer reconnect cycle (~2s).
+- A peer being its own standalone dashboard is unaffected by any hub state.

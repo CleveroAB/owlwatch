@@ -8,19 +8,21 @@ import { Sparkline } from './Sparkline';
 const WAITING = 'waiting for data…';
 
 interface TilesProps {
+  /** Scopes the sticky mount→hue assignment (multi-server hubs). */
+  serverId: string;
   host: HostInfo | null;
   latest: Snapshot | null;
   buffer: Snapshot[];
 }
 
-export function StatTiles({ host, latest, buffer }: TilesProps) {
+export function StatTiles({ serverId, host, latest, buffer }: TilesProps) {
   const showGPU = host?.hasGPU === true || (latest?.gpus.length ?? 0) > 0;
   return (
     <div className="tiles">
       <CpuTile host={host} latest={latest} buffer={buffer} />
       <MemTile latest={latest} buffer={buffer} />
       {showGPU && <GpuTile host={host} latest={latest} buffer={buffer} />}
-      <DiskTile latest={latest} />
+      <DiskTile serverId={serverId} latest={latest} />
     </div>
   );
 }
@@ -60,7 +62,7 @@ function StatTile({
   );
 }
 
-function CpuTile({ host, latest, buffer }: TilesProps) {
+function CpuTile({ host, latest, buffer }: Omit<TilesProps, 'serverId'>) {
   const cpu = latest?.cpu ?? null;
   const pct = cpu?.usagePct ?? 0;
   const cores = host?.cpuCores ?? cpu?.perCore.length ?? 0;
@@ -77,7 +79,7 @@ function CpuTile({ host, latest, buffer }: TilesProps) {
   );
 }
 
-function MemTile({ latest, buffer }: Omit<TilesProps, 'host'>) {
+function MemTile({ latest, buffer }: Omit<TilesProps, 'serverId' | 'host'>) {
   const mem = latest?.mem ?? null;
   const sub = mem
     ? `of ${formatBytesTick(mem.total)} · ${Math.round(mem.usedPct)}%` +
@@ -101,7 +103,7 @@ function gpuAvgUtil(s: Snapshot): number | null {
   return s.gpus.reduce((sum, g) => sum + g.utilPct, 0) / s.gpus.length;
 }
 
-function GpuTile({ host, latest, buffer }: TilesProps) {
+function GpuTile({ host, latest, buffer }: Omit<TilesProps, 'serverId'>) {
   const gpus = latest?.gpus ?? [];
   const has = gpus.length > 0;
   const avg = has ? gpus.reduce((sum, g) => sum + g.utilPct, 0) / gpus.length : 0;
@@ -133,9 +135,9 @@ function GpuTile({ host, latest, buffer }: TilesProps) {
  * sticky mount→slot assigner (also used by the disk chart) so identity
  * matches across the page and never reshuffles.
  */
-function DiskTile({ latest }: { latest: Snapshot | null }) {
+function DiskTile({ serverId, latest }: { serverId: string; latest: Snapshot | null }) {
   const disks = latest?.disks ?? [];
-  registerMounts(disks.map((d) => d.mount).sort());
+  registerMounts(serverId, disks.map((d) => d.mount).sort());
   const byUsage = [...disks].sort((a, b) => b.usedPct - a.usedPct);
   const fullest = byUsage[0] ?? null;
   return (
@@ -153,7 +155,7 @@ function DiskTile({ latest }: { latest: Snapshot | null }) {
                 {truncateMountPath(d.mount)}
               </span>
               <span className="mount-pct">{formatPct(d.usedPct)}</span>
-              <Meter pct={d.usedPct} hue={mountColor(d.mount)} />
+              <Meter pct={d.usedPct} hue={mountColor(serverId, d.mount)} />
             </div>
           ))}
         </div>

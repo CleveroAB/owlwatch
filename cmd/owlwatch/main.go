@@ -19,6 +19,7 @@ import (
 
 	"github.com/CleveroAB/owlwatch/internal/collector"
 	"github.com/CleveroAB/owlwatch/internal/metrics"
+	"github.com/CleveroAB/owlwatch/internal/peers"
 	"github.com/CleveroAB/owlwatch/internal/server"
 	"github.com/CleveroAB/owlwatch/internal/store"
 )
@@ -34,6 +35,8 @@ type appConfig struct {
 	retentionDays   int
 	rootfs          string
 	allowedHosts    []string
+	peers           []peers.Peer // OWLWATCH_PEERS: non-empty makes this instance a hub (DESIGN.md §9)
+	token           string       // OWLWATCH_TOKEN: API auth + default outgoing peer token
 }
 
 func main() {
@@ -83,6 +86,18 @@ func run(cfg appConfig) error {
 		persistLoop(ctx, col, st, cfg.persistInterval, time.Duration(cfg.retentionDays)*24*time.Hour)
 	}()
 
+	// Hub mode (DESIGN.md §9): maintain one live connection per peer for as
+	// long as we run. Standalone instances get no client at all.
+	var peersClient *peers.Client
+	if len(cfg.peers) > 0 {
+		peersClient = peers.NewClient(cfg.peers)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			peersClient.Run(ctx)
+		}()
+	}
+
 	host := col.HostInfo()
 	host.Version = version // HostInfo fills everything except Version (see collector docs)
 
@@ -90,7 +105,12 @@ func run(cfg appConfig) error {
 	if host.HasGPU {
 		gpu = "yes"
 	}
-	log.Printf("owlwatch %s listening on :%d (db: %s, gpu: %s)", version, cfg.port, cfg.dbPath, gpu)
+	auth := "off"
+	if cfg.token != "" {
+		auth = "on"
+	}
+	log.Printf("owlwatch %s listening on :%d (db: %s, gpu: %s, peers: %d, auth: %s)",
+		version, cfg.port, cfg.dbPath, gpu, len(cfg.peers), auth)
 
 	srv := server.New(server.Config{
 		Addr:           fmt.Sprintf(":%d", cfg.port),
@@ -99,6 +119,8 @@ func run(cfg appConfig) error {
 		Host:           host,
 		SampleInterval: cfg.sampleInterval,
 		AllowedHosts:   cfg.allowedHosts,
+		Peers:          peersClient,
+		Token:          cfg.token,
 	})
 	serveErr := srv.ListenAndServe(ctx)
 
@@ -166,6 +188,8 @@ func persistLoop(ctx context.Context, col *collector.Collector, st *store.Store,
 }
 
 // runHealthcheck implements `owlwatch -healthcheck` for Docker HEALTHCHECK.
+// /healthz sits outside the /api/ token gate (DESIGN.md §9.2), so no token
+// is needed even when OWLWATCH_TOKEN is set.
 func runHealthcheck(port int) int {
 	client := &http.Client{Timeout: 4 * time.Second}
 	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/healthz", port))
@@ -223,6 +247,14 @@ func loadConfig() (appConfig, error) {
 		if name = strings.TrimSpace(name); name != "" {
 			cfg.allowedHosts = append(cfg.allowedHosts, name)
 		}
+	}
+	// Federation (DESIGN.md §9): the token gates our own API and is the
+	// default outgoing token for peers; peers make this instance a hub. An
+	// invalid OWLWATCH_PEERS must be a fatal startup error, never a silent
+	// skip.
+	cfg.token = os.Getenv("OWLWATCH_TOKEN")
+	if cfg.peers, err = peers.ParsePeers(os.Getenv("OWLWATCH_PEERS"), cfg.token); err != nil {
+		return cfg, fmt.Errorf("OWLWATCH_PEERS: %w", err)
 	}
 	return cfg, nil
 }

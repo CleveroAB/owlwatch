@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"log"
 	"net"
@@ -106,6 +107,44 @@ func hostAllowed(hostport string, allowed []string) bool {
 		}
 	}
 	return false
+}
+
+// withTokenAuth guards every /api/ route with the configured token
+// (DESIGN.md §9.2), answering 401 JSON without it. /healthz and the static
+// UI stay open: the UI shell is public, the data behind it is not, and
+// `owlwatch -healthcheck` must keep working tokenless. An empty token
+// disables the check (the v1 no-auth behavior).
+func withTokenAuth(token string, next http.Handler) http.Handler {
+	if token == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isAPIPath(r.URL.Path) && !tokenMatches(r, token) {
+			writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isAPIPath reports whether a request path is under the token-gated /api/
+// tree. Bare /api (an unknown endpoint answered 404 by the UI handler) is
+// gated too, so probing cannot tell gated routes from missing ones.
+func isAPIPath(path string) bool {
+	return path == "/api" || strings.HasPrefix(path, "/api/")
+}
+
+// tokenMatches reports whether the request presents the API token, either as
+// `Authorization: Bearer <t>` or as a `?token=<t>` query parameter — the
+// query form exists because EventSource cannot set headers (DESIGN.md §9.2).
+// Both compares are constant-time; only the guess's length can leak, which
+// is fine for a bearer token.
+func tokenMatches(r *http.Request, token string) bool {
+	if bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok &&
+		subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) == 1 {
+		return true
+	}
+	return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
 }
 
 // withRecovery turns handler panics into 500s instead of killing the
