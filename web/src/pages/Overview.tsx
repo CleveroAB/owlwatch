@@ -33,7 +33,7 @@ export function mergeSparks(prev: Sparks, servers: ServerSummary[]): Sparks {
 
 /**
  * Hub overview (§9.5): a live grid of server cards, all fed by ONE
- * /api/overview/live EventSource. The bootstrap /api/servers response
+ * authenticated /api/overview/live fetch stream. The bootstrap response
  * renders the first frame; the stream's `servers` event replaces it and
  * `snapshot`/`status` events keep it current.
  */
@@ -41,10 +41,12 @@ export function Overview({
   servers: initialServers,
   theme,
   onToggleTheme,
+  onServersChange,
 }: {
   servers: ServerSummary[];
   theme: Theme;
   onToggleTheme: () => void;
+  onServersChange: (servers: ServerSummary[]) => void;
 }) {
   const [status, setStatus] = useState<ConnectionState>('connecting');
   const [servers, setServers] = useState<ServerSummary[]>(initialServers);
@@ -59,6 +61,7 @@ export function Overview({
       onState: setStatus,
       onServers: (list) => {
         setServers(list);
+        onServersChange(list);
         setSparks((prev) => mergeSparks(prev, list));
       },
       onSnapshot: ({ id, snapshot }) => {
@@ -76,12 +79,13 @@ export function Overview({
         setServers((prev) => prev.map((s) => (s.id === id ? { ...s, online, lastSeen } : s)));
       },
     });
-  }, []);
+  }, [onServersChange]);
 
   return (
     <div className="page">
       <Header host={null} status={status} theme={theme} onToggleTheme={onToggleTheme} />
       <main>
+        <h1 className="sr-only">Owlwatch server overview</h1>
         <section className="overview-grid" aria-label="Servers">
           {servers.map((s) => (
             <ServerCard key={s.id} server={s} spark={sparks[s.id] ?? []} />

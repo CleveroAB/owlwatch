@@ -82,6 +82,9 @@ func ParsePeers(env, defaultToken string) ([]Peer, error) {
 			return nil, fmt.Errorf("peers: %s: %w", name, err)
 		}
 		peers = append(peers, Peer{ID: id, Name: name, URL: u, Token: token})
+		if len(peers) > 32 {
+			return nil, fmt.Errorf("peers: at most 32 peers are supported per hub")
+		}
 	}
 	if len(peers) == 0 {
 		return nil, nil // e.g. OWLWATCH_PEERS="," — nothing actually configured

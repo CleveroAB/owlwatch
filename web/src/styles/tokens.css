@@ -5,7 +5,7 @@
 
 :root[data-theme="light"] {
   --page:      #f9f9f7;  --surface:  #fcfcfb;
-  --ink:       #0b0b0b;  --ink-2:    #52514e;  --ink-muted: #898781;
+  --ink:       #0b0b0b;  --ink-2:    #52514e;  --ink-muted: #686660;
   --grid:      #e1e0d9;  --baseline: #c3c2b7;
   --border:    rgba(11,11,11,0.10);
   --series-1:  #2a78d6;  /* blue    — CPU        */

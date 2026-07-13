@@ -65,8 +65,35 @@ func TestWithHostCheck(t *testing.T) {
 	}
 }
 
-// Token auth (DESIGN.md §9.2): every /api/ route requires the token — as a
-// Bearer header or a ?token= query param — while /healthz and the UI stay
+func TestWithSecurityHeaders(t *testing.T) {
+	h := withSecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	want := map[string]string{
+		"Cross-Origin-Opener-Policy":   "same-origin",
+		"Cross-Origin-Resource-Policy": "same-origin",
+		"Permissions-Policy":           "camera=(), geolocation=(), microphone=()",
+		"Referrer-Policy":              "no-referrer",
+		"X-Content-Type-Options":       "nosniff",
+		"X-Frame-Options":              "DENY",
+	}
+	for name, value := range want {
+		if got := rec.Header().Get(name); got != value {
+			t.Errorf("%s = %q, want %q", name, got, value)
+		}
+	}
+	if csp := rec.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") || !strings.Contains(csp, "connect-src 'self'") {
+		t.Errorf("Content-Security-Policy is incomplete: %q", csp)
+	} else if strings.Contains(csp, "script-src 'self' 'unsafe-inline'") {
+		t.Errorf("Content-Security-Policy permits inline scripts: %q", csp)
+	}
+}
+
+// Token auth (DESIGN.md §9.2): every /api/ route requires a Bearer header;
+// URL query credentials are rejected, while /healthz and the UI stay
 // open, and an empty configured token disables the check entirely.
 func TestWithTokenAuth(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,9 +115,9 @@ func TestWithTokenAuth(t *testing.T) {
 		{"wrong bearer", "s3cret", "/api/host", "Bearer nope", http.StatusUnauthorized},
 		{"missing Bearer prefix", "s3cret", "/api/host", "s3cret", http.StatusUnauthorized},
 		{"token as bearer prefix only", "s3cret", "/api/host", "Bearer s3cr", http.StatusUnauthorized},
-		{"valid query token", "s3cret", "/api/servers/db1/live?token=s3cret", "", http.StatusNoContent},
+		{"query tokens are rejected", "s3cret", "/api/servers/db1/live?token=s3cret", "", http.StatusUnauthorized},
 		{"wrong query token", "s3cret", "/api/live?token=nope", "", http.StatusUnauthorized},
-		{"wrong bearer, valid query", "s3cret", "/api/live?token=s3cret", "Bearer nope", http.StatusNoContent},
+		{"wrong bearer, valid query", "s3cret", "/api/live?token=s3cret", "Bearer nope", http.StatusUnauthorized},
 		{"healthz stays open", "s3cret", "/healthz", "", http.StatusNoContent},
 		{"ui shell stays open", "s3cret", "/", "", http.StatusNoContent},
 		{"ui assets stay open", "s3cret", "/assets/index-abc123.js", "", http.StatusNoContent},
@@ -112,6 +139,38 @@ func TestWithTokenAuth(t *testing.T) {
 					t.Errorf("body = %q, want the unauthorized JSON error", body)
 				}
 			}
+		})
+	}
+}
+
+func TestWithRequestLimits(t *testing.T) {
+	for _, path := range []string{"/api/live", "/api/history"} {
+		t.Run(path, func(t *testing.T) {
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			h := withRequestLimits(1, 1, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				close(entered)
+				<-release
+				w.WriteHeader(http.StatusNoContent)
+			}))
+
+			firstDone := make(chan struct{})
+			go func() {
+				defer close(firstDone)
+				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+			}()
+			<-entered
+
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			if rec.Code != http.StatusTooManyRequests {
+				t.Fatalf("second request status = %d, want 429", rec.Code)
+			}
+			if got := rec.Header().Get("Retry-After"); got != "5" {
+				t.Fatalf("Retry-After = %q, want 5", got)
+			}
+			close(release)
+			<-firstDone
 		})
 	}
 }

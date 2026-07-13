@@ -56,8 +56,9 @@ export function ServerPage({
   }, []);
 
   useEffect(() => {
-    if (host) document.title = `owlwatch · ${host.hostname}`;
-  }, [host]);
+    const configuredName = servers.find((server) => server.id === id)?.name ?? id;
+    document.title = `owlwatch · ${host?.hostname ?? configuredName}`;
+  }, [host, id, servers]);
 
   // An offline peer keeps the hub's stream open, but for the viewer the
   // server is unreachable — surface the existing amber reconnecting state.
@@ -74,6 +75,7 @@ export function ServerPage({
         hubNav={hub ? { servers, currentId: id } : undefined}
       />
       <main>
+        <h1 className="sr-only">Owlwatch server dashboard</h1>
         <StatTiles serverId={id} host={host} latest={latest} buffer={buffer} />
         <section className="history" aria-label="History">
           <RangePicker value={range} onChange={changeRange} />
@@ -89,12 +91,18 @@ export function ServerPage({
                 : 'Server unreachable — no data received yet'}
             </p>
           )}
+          {history.error && (
+            <p className="chart-notice" role="alert">
+              Could not load {range} history
+              {history.range && history.range !== range ? ` — still showing ${history.range}` : ''}. Retrying automatically.
+            </p>
+          )}
           <HistorySection
             serverId={id}
             points={history.points}
             stale={history.stale}
             error={history.error}
-            range={range}
+            range={history.range ?? range}
             host={host}
           />
         </section>

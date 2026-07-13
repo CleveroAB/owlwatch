@@ -34,9 +34,10 @@ export function ServerCard({ server, spark }: { server: ServerSummary; spark: nu
   return (
     <a className={online ? 'card server-card' : 'card server-card offline'} href={`#/s/${encodeURIComponent(id)}`}>
       <div className="server-card-head">
-        <span className="server-name">{name}</span>
-        {host && host.hostname !== name && <span className="chip">{host.hostname}</span>}
-        <span className="spacer" />
+        <span className="server-identity">
+          <span className="server-name">{name}</span>
+          {host && host.hostname !== name && <span className="chip">{host.hostname}</span>}
+        </span>
         <span className="conn" role="status">
           <span
             className="conn-dot"

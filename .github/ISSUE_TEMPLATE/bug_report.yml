@@ -1,0 +1,69 @@
+name: Bug report
+description: Report a reproducible problem in owlwatch
+title: "[Bug]: "
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve owlwatch. For vulnerabilities, stop here and use the private process in SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: owlwatch version
+      description: Release tag or image digest. The footer also shows the running version.
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment method
+      options:
+        - Docker Compose
+        - docker run
+        - Native binary
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Host platform
+      placeholder: Ubuntu 24.04, linux/amd64, Docker 27
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Start owlwatch with ...
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant sanitized logs
+      description: Never include tokens, private peer URLs, hostnames, or other secrets.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: I removed tokens and sensitive host information.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

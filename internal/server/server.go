@@ -29,6 +29,8 @@ type Config struct {
 	AllowedHosts   []string         // OWLWATCH_ALLOWED_HOSTS: extra Host header names accepted by withHostCheck
 	Peers          *peers.Client    // OWLWATCH_PEERS hub state (DESIGN.md §9); nil = standalone
 	Token          string           // OWLWATCH_TOKEN: required on /api/ routes when non-empty
+	MaxSSEClients  int              // global concurrent SSE cap
+	MaxHistory     int              // global concurrent history-query cap
 }
 
 // Server serves the JSON API, the SSE live streams and the embedded UI.
@@ -40,6 +42,12 @@ type Server struct {
 
 // New builds the route table and middleware chain.
 func New(cfg Config) *Server {
+	if cfg.MaxSSEClients <= 0 {
+		cfg.MaxSSEClients = 128
+	}
+	if cfg.MaxHistory <= 0 {
+		cfg.MaxHistory = 16
+	}
 	// The UI contract types gpuNames as an array; never let it marshal as null.
 	if cfg.Host.GPUNames == nil {
 		cfg.Host.GPUNames = []string{}
@@ -69,8 +77,8 @@ func New(cfg Config) *Server {
 
 	// Token auth sits inside the host check so a rebound Host is answered
 	// with 421 before it can even probe whether auth is on.
-	s.handler = withLogging(withRecovery(withHostCheck(cfg.AllowedHosts,
-		withTokenAuth(cfg.Token, mux))))
+	s.handler = withLogging(withSecurityHeaders(withRecovery(withHostCheck(cfg.AllowedHosts,
+		withTokenAuth(cfg.Token, withRequestLimits(cfg.MaxSSEClients, cfg.MaxHistory, mux))))))
 	return s
 }
 
@@ -95,6 +103,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		ReadTimeout:       0,
 		WriteTimeout:      0,
 		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    16 << 10,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
 
@@ -153,8 +162,8 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 
 // handleHealthz reports 200 only while the sampler is live: a sample must
 // exist and be no older than 5× the sample interval (DESIGN.md §3.3). A
-// wedged sampler therefore flips health, and Docker's HEALTHCHECK restarts
-// the container.
+// wedged sampler therefore flips health. Docker marks the container unhealthy;
+// an orchestrator or external auto-heal policy may then restart it.
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	snap, ok := s.cfg.Collector.Latest()

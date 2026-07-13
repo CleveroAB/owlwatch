@@ -13,12 +13,11 @@ import (
 	"github.com/CleveroAB/owlwatch/internal/metrics"
 )
 
-// maxEventBytes caps one SSE line AND the accumulated data payload of one
-// event (a peer streaming endless data lines must not grow hub memory). A
-// hello event carries up to 150 snapshots (per-core CPU on big machines, many
-// disks) — well under 1 MiB in practice; 8 MiB is generous headroom that
-// still bounds a misbehaving upstream.
-const maxEventBytes = 8 << 20
+// maxEventBytes caps one SSE line and one accumulated event payload. A normal
+// hello with 150 compact snapshots is far smaller; keeping this at 128 KiB
+// prevents a malformed peer from turning the 150-item cache into a large
+// byte-retention attack.
+const maxEventBytes = 128 << 10
 
 // helloPayload mirrors the /api/live hello event body served by
 // internal/server/sse.go (the wire contract in DESIGN.md §4).
@@ -60,8 +59,6 @@ func (c *Client) stream(ctx context.Context, p Peer) bool {
 		c.errlog.printf(p.ID, "peers: %s: /api/live returned Content-Type %q, want text/event-stream", p.ID, resp.Header.Get("Content-Type"))
 		return false
 	}
-	c.setOnline(p, true)
-
 	// Stall watchdog: any received bytes (heartbeat comments included) reset
 	// the timer; total silence for stallTimeout closes the body, which
 	// unblocks the pending read and ends this connection.
@@ -176,6 +173,9 @@ func (c *Client) dispatch(p Peer, event string, data []byte) {
 			return
 		}
 		c.applyHello(p, hello)
+		// A transport-level 200 is not enough to call a peer healthy. Only a
+		// decodable hello proves this is a compatible owlwatch endpoint.
+		c.setOnline(p, true)
 	case "snapshot":
 		var snap metrics.Snapshot
 		if err := json.Unmarshal(data, &snap); err != nil {

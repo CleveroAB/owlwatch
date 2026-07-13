@@ -42,6 +42,23 @@ func (sr *statusRecorder) Flush() {
 
 func (sr *statusRecorder) Unwrap() http.ResponseWriter { return sr.ResponseWriter }
 
+// withSecurityHeaders hardens both the UI and API without assuming TLS is
+// terminated by owlwatch itself. HSTS is deliberately omitted: deployments
+// may be plain HTTP on a trusted LAN, and a reverse proxy that owns HTTPS is
+// the correct place to set it.
+func withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // withLogging logs one line per request: method, path, status, duration.
 // The log line is deferred so aborted and panicking requests still log. The
 // path is percent-decoded attacker input, so it is logged with %q: decoded
@@ -127,6 +144,34 @@ func withTokenAuth(token string, next http.Handler) http.Handler {
 	})
 }
 
+// withRequestLimits bounds the two expensive request classes: long-lived SSE
+// subscriptions and SQLite/peer history queries. Limits are process-wide and
+// fail fast so overload cannot accumulate unbounded goroutines or memory.
+func withRequestLimits(maxSSE, maxHistory int, next http.Handler) http.Handler {
+	sseSlots := make(chan struct{}, maxSSE)
+	historySlots := make(chan struct{}, maxHistory)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var slots chan struct{}
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/api/") && strings.HasSuffix(r.URL.Path, "/live"):
+			slots = sseSlots
+		case strings.HasPrefix(r.URL.Path, "/api/") && strings.HasSuffix(r.URL.Path, "/history"):
+			slots = historySlots
+		default:
+			next.ServeHTTP(w, r)
+			return
+		}
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+			next.ServeHTTP(w, r)
+		default:
+			w.Header().Set("Retry-After", "5")
+			writeJSONError(w, http.StatusTooManyRequests, "server is busy; retry later")
+		}
+	})
+}
+
 // isAPIPath reports whether a request path is under the token-gated /api/
 // tree. Bare /api (an unknown endpoint answered 404 by the UI handler) is
 // gated too, so probing cannot tell gated routes from missing ones.
@@ -134,17 +179,12 @@ func isAPIPath(path string) bool {
 	return path == "/api" || strings.HasPrefix(path, "/api/")
 }
 
-// tokenMatches reports whether the request presents the API token, either as
-// `Authorization: Bearer <t>` or as a `?token=<t>` query parameter — the
-// query form exists because EventSource cannot set headers (DESIGN.md §9.2).
-// Both compares are constant-time; only the guess's length can leak, which
-// is fine for a bearer token.
+// tokenMatches reports whether the request presents the API token in an
+// `Authorization: Bearer` header. URL query credentials are deliberately not
+// accepted because URLs leak into access logs, traces, and support captures.
 func tokenMatches(r *http.Request, token string) bool {
-	if bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok &&
-		subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) == 1 {
-		return true
-	}
-	return subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("token")), []byte(token)) == 1
+	bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return ok && subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) == 1
 }
 
 // withRecovery turns handler panics into 500s instead of killing the

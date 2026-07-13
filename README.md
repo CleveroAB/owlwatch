@@ -6,12 +6,16 @@ live (updated every 2 seconds over SSE) and over time (SQLite history, 1 hour
 to 30 days). No agents, no external database, no config files.
 
 [![CI](https://github.com/CleveroAB/owlwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/CleveroAB/owlwatch/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/CleveroAB/owlwatch/actions/workflows/codeql.yml/badge.svg)](https://github.com/CleveroAB/owlwatch/actions/workflows/codeql.yml)
+[![Release](https://img.shields.io/github/v/release/CleveroAB/owlwatch)](https://github.com/CleveroAB/owlwatch/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 ![owlwatch dashboard (dark theme)](docs/screenshot-dark.png)
 
 *Dark is the default theme; here is the same dashboard in the
 [light theme](docs/screenshot-light.png).*
+
+## Security and exposure
 
 > [!WARNING]
 > **owlwatch has no TLS, and no authentication unless you set
@@ -24,6 +28,11 @@ to 30 days). No agents, no external database, no config files.
 > internet. It is read-only — metrics out, nothing in — but treat host
 > telemetry as sensitive anyway.
 
+For an internet-reachable deployment, generate a strong token with
+`openssl rand -base64 32`, then follow the tested [Caddy, nginx, or Tailscale
+recipes](docs/deployment.md). Security vulnerabilities should be reported
+privately according to [SECURITY.md](SECURITY.md).
+
 ## Quick start
 
 ### From a clone
@@ -31,29 +40,28 @@ to 30 days). No agents, no external database, no config files.
 ```sh
 git clone https://github.com/CleveroAB/owlwatch.git
 cd owlwatch
-docker compose up -d --build
+docker compose up -d
 ```
 
 Open <http://localhost:8080>. That's it.
 
 If host port 8080 is taken, override the published port without editing the
-file: `OWLWATCH_HOST_PORT=7676 docker compose up -d --build` (or set
+file: `OWLWATCH_HOST_PORT=7676 docker compose up -d` (or set
 `OWLWATCH_HOST_PORT` in your platform's environment settings — Coolify,
 Portainer, etc.). The port *inside* the container stays 8080.
 
-To stamp the build with a version, pass
-`--build-arg VERSION=$(git describe --tags --always)` to `docker build`
-(compose users: add it under `build.args`).
-
 ### Prebuilt image
 
-No clone needed — images are published to GitHub Container Registry from
-`main` by CI:
+No clone needed — images are published to GitHub Container Registry by CI.
+Use `latest` for the newest stable release, pin `1.0`/`1.0.0` in controlled
+environments, or use `edge` to test the current `main` branch:
 
 ```sh
 docker run -d --name owlwatch \
-  -p 8080:8080 \
+  -p 127.0.0.1:8080:8080 \
   --restart unless-stopped \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --tmpfs /tmp \
   -e HOST_PROC=/host/proc \
   -e HOST_SYS=/host/sys \
   -e HOST_ETC=/host/etc \
@@ -65,6 +73,12 @@ docker run -d --name owlwatch \
   -v owlwatch-data:/data \
   ghcr.io/cleveroab/owlwatch:latest
 ```
+
+Versioned native Linux binaries for amd64 and arm64 are attached to every
+[GitHub release](https://github.com/CleveroAB/owlwatch/releases). They run the
+same headless server and embedded web UI without Docker; owlwatch is not a
+desktop application. Containers remain the recommended installation because
+the supplied mounts make the host boundary explicit and reproducible.
 
 ### Why all those mounts?
 
@@ -82,13 +96,16 @@ the **host**, not the container:
 The rootfs mount uses `ro,rslave` (the same pattern node_exporter documents):
 with the default private propagation, filesystems mounted on the host *after*
 the container starts would not appear inside it, and their disk usage would
-silently be read from the empty mountpoint directory underneath. The container
-runs as root — that's required to read the host's `/proc` and `/sys` through
-the bind mounts.
+silently be read from the empty mountpoint directory underneath.
 
-Host monitoring from a container works on **Linux hosts**. On Docker Desktop
-(macOS/Windows) you'll be watching Docker's Linux VM, not your machine — run
-the binary natively instead (see [Local development](#local-development)).
+The service runs as the distroless `nonroot` user with a read-only root
+filesystem, no Linux capabilities, and `no-new-privileges`. Only the persistent
+`/data` volume and temporary `/tmp` filesystem are writable. Standard Linux
+host metrics remain readable through the supplied read-only bind mounts.
+
+Host monitoring is supported on **Linux hosts**. Docker Desktop on macOS or
+Windows would monitor Docker's Linux VM rather than the physical machine and
+is therefore not a supported deployment target.
 
 ## Monitoring multiple servers (federation)
 
@@ -111,8 +128,8 @@ give it two extra environment variables:
 ```yaml
     environment:
       # ...the quick-start variables, plus:
-      OWLWATCH_PEERS: web1=http://10.0.0.11:8080,db1=http://10.0.0.12:8080
-      OWLWATCH_TOKEN: <shared>   # same value on web1 and db1 — see below
+      OWLWATCH_PEERS: web1=https://web1.example.com|WEB1_TOKEN,db1=https://db1.example.com|DB1_TOKEN
+      OWLWATCH_TOKEN: HUB_TOKEN
 ```
 
 Open the hub's port and you get an overview grid with a live card per server;
@@ -130,24 +147,23 @@ not the reserved words `local` or `overview`. Peer **URLs** must be absolute
 
 ### Access tokens
 
-Set the **same** `OWLWATCH_TOKEN` on every instance, hub and peers alike.
-When it is set:
+Set a different strong `OWLWATCH_TOKEN` on each internet-reachable instance.
+Give the hub each peer's token in that peer's `name=url|token` entry. The hub's own token can remain distinct. When a token is set:
 
-- every `/api/*` route requires the token — as `Authorization: Bearer
-  <token>` or as a `?token=<token>` query parameter — and answers `401`
-  without it;
-- the hub authenticates to its peers with it automatically;
+- every `/api/*` route requires an `Authorization: Bearer` header and answers
+  `401` without it;
+- the hub authenticates to each peer with that peer's configured token;
 - the dashboard asks you for the token once (it is kept in the browser's
   localStorage and attached to every request);
 - `/healthz` is not under `/api` and stays open, so the Docker `HEALTHCHECK`
   keeps working. The static UI shell is also public — the pages load, the
   data behind them doesn't.
 
-If one peer needs a different token, append it per peer with
+Append each peer's token with
 `name=url|token`:
 
 ```
-OWLWATCH_PEERS=web1=http://10.0.0.11:8080,db1=http://10.0.0.12:8080|other-secret
+OWLWATCH_PEERS=web1=https://web1.example.com|WEB1_TOKEN,db1=https://db1.example.com|DB1_TOKEN
 ```
 
 A token protects the API but is no substitute for TLS — the warning at the
@@ -182,6 +198,7 @@ Everything is environment variables; the defaults are sensible.
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `OWLWATCH_LISTEN` | `127.0.0.1` | HTTP listen address; the image uses `0.0.0.0` internally while Compose publishes only to host loopback |
 | `OWLWATCH_PORT` | `8080` | HTTP listen port |
 | `OWLWATCH_DB` | `./data/owlwatch.db` | SQLite path (the Docker image sets `/data/owlwatch.db`) |
 | `OWLWATCH_SAMPLE_INTERVAL` | `2s` | live sampling cadence (Go duration syntax) |
@@ -189,8 +206,10 @@ Everything is environment variables; the defaults are sensible.
 | `OWLWATCH_RETENTION_DAYS` | `30` | history retention (pruned hourly) |
 | `OWLWATCH_ROOTFS` | *(empty)* | container mode: path where the host `/` is bind-mounted (e.g. `/host/rootfs`); empty = native mode |
 | `OWLWATCH_ALLOWED_HOSTS` | *(empty)* | extra Host-header names to accept (comma-separated). IP-literal hosts and `localhost` are always accepted; other names are rejected with 421 to block DNS rebinding |
-| `OWLWATCH_PEERS` | *(empty)* | comma-separated `name=url` pairs, e.g. `web1=http://10.0.0.11:8080,db1=https://db.example.com\|s3cret`. An optional `\|token` suffix per peer overrides `OWLWATCH_TOKEN` for that peer's outgoing requests. Setting this makes the instance a [hub](#monitoring-multiple-servers-federation) |
-| `OWLWATCH_TOKEN` | *(empty)* | when set, every `/api/*` route requires `Authorization: Bearer <token>` or `?token=<token>` (`/healthz` is not under `/api` and stays open). Also used as the default outgoing token for peers |
+| `OWLWATCH_PEERS` | *(empty)* | comma-separated `name=url\|token` pairs, e.g. `web1=https://web1.example.com\|WEB1_TOKEN`. Each token authenticates the hub to that peer; setting this makes the instance a [hub](#monitoring-multiple-servers-federation) |
+| `OWLWATCH_TOKEN` | *(empty)* | every `/api/*` route requires `Authorization: Bearer` when set (`/healthz` stays open); minimum 16 characters. Also used as the fallback outgoing peer token when an entry omits its own token |
+| `OWLWATCH_MAX_SSE_CLIENTS` | `128` | maximum concurrent live-stream clients |
+| `OWLWATCH_MAX_HISTORY_REQUESTS` | `16` | maximum concurrent history requests |
 | `HOST_PROC`, `HOST_SYS`, `HOST_ETC`, `HOST_VAR`, `HOST_RUN` | *(unset)* | standard [gopsutil](https://github.com/shirou/gopsutil) redirects; docker-compose sets the first three |
 
 ### URL parameters
@@ -206,7 +225,7 @@ http://localhost:8080/?theme=light
 
 ## Local development
 
-Requirements: Go 1.24+ and Node 20+.
+Requirements: Go 1.25+ and Node 22+.
 
 The Go binary embeds the compiled frontend via `go:embed`, and `web/dist` is
 gitignored — so **the frontend must be built before any Go build** or the
@@ -214,7 +233,7 @@ embed directive fails. The Makefile encodes that order:
 
 ```sh
 make build   # npm ci + vite build, then go build → ./owlwatch
-make run     # make build, then run it on :8080
+make run     # make build, then run it on 127.0.0.1:8080
 ```
 
 For UI iteration, run the two dev servers side by side:
@@ -228,8 +247,8 @@ cd web && npm run dev
 ```
 
 Iterate on the UI at <http://localhost:5173> with hot reload; the Vite proxy
-forwards `/api` (including the SSE stream) to the Go backend. Running natively
-on macOS works — there's just no GPU section.
+forwards `/api` (including the SSE stream) to the Go backend. Production host
+monitoring and official release artifacts target Linux.
 
 ## API
 
@@ -238,7 +257,7 @@ All JSON. The exact shapes live in
 [`internal/metrics/federation.go`](internal/metrics/federation.go), with
 their mirror in [`web/src/lib/types.ts`](web/src/lib/types.ts). When
 `OWLWATCH_TOKEN` is set, every `/api/*` route requires the token
-(`Authorization: Bearer` or `?token=`) — `/healthz` never does.
+with an `Authorization: Bearer` header — `/healthz` never does.
 
 | Endpoint | Returns |
 |---|---|
@@ -280,6 +299,20 @@ instances federate cleanly.
 
 The full design — package contracts, wire formats, schema, UI spec — lives in
 [DESIGN.md](DESIGN.md).
+
+## Support and contributing
+
+- Read [Troubleshooting](docs/troubleshooting.md) for common deployment,
+  federation, GPU, history, and proxy problems.
+- Ask usage questions in [GitHub
+  Discussions](https://github.com/CleveroAB/owlwatch/discussions).
+- Report reproducible defects or focused feature requests with the repository's
+  issue forms.
+- Read [CONTRIBUTING.md](CONTRIBUTING.md), [GOVERNANCE.md](GOVERNANCE.md),
+  and the [Code of Conduct](CODE_OF_CONDUCT.md) before opening a pull request.
+- Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+- See [CHANGELOG.md](CHANGELOG.md) for release history and [SUPPORT.md](SUPPORT.md)
+  for the support scope.
 
 ## License
 
