@@ -465,7 +465,7 @@ localStorage.
 Multi-stage `Dockerfile`:
 
 1. `node:22-alpine` — `COPY web/`, `npm ci`, `npm run build`.
-2. `golang:1.26-alpine` — copy module files + source, copy `web/dist` from
+2. `golang:1.26.5-alpine` — copy module files + source, copy `web/dist` from
    stage 1 into `web/dist`, `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w
    -X main.version=$VERSION" ./cmd/owlwatch`. `ARG VERSION=dev`.
 3. Final: `gcr.io/distroless/base-debian12:nonroot` (glibc present for the injected

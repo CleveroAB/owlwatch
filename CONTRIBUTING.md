@@ -5,7 +5,7 @@ is the architecture contract the code was built against.
 
 ## Prerequisites
 
-- Go 1.25+
+- Go 1.26.5+
 - Node 22+
 
 ## Build order matters

@@ -14,7 +14,7 @@ RUN npm run build
 # Also runs on the build host's platform and cross-compiles to the target:
 # Go cross-compilation (CGO_ENABLED=0) is much faster than emulating the
 # compiler under QEMU for multi-arch builds.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

@@ -225,7 +225,7 @@ http://localhost:8080/?theme=light
 
 ## Local development
 
-Requirements: Go 1.25+ and Node 22+.
+Requirements: Go 1.26.5+ and Node 22+.
 
 The Go binary embeds the compiled frontend via `go:embed`, and `web/dist` is
 gitignored — so **the frontend must be built before any Go build** or the

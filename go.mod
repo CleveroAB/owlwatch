@@ -1,6 +1,6 @@
 module github.com/CleveroAB/owlwatch
 
-go 1.25.0
+go 1.26.5
 
 require (
 	github.com/shirou/gopsutil/v4 v4.26.6
