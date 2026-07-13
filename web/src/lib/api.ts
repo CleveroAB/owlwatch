@@ -44,6 +44,14 @@ export function setToken(token: string): void {
   }
 }
 
+export function clearToken(): void {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 /** Thrown on HTTP 401 so the app can show the token gate instead of an error. */
 export class UnauthorizedError extends Error {
   constructor(path: string) {
@@ -70,15 +78,15 @@ export function serverBase(id: string): string {
   return `/api/servers/${encodeURIComponent(id)}`;
 }
 
-/**
- * EventSource cannot set headers, so SSE URLs carry the token as a query
- * parameter (the server accepts both forms). Evaluated per connection
- * attempt so a token saved after a 401 applies on the next redial.
- */
-function sseUrl(path: string): string {
+/** Headers for authenticated REST and streaming requests. */
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = getToken();
-  if (!token) return path;
-  return `${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}`;
+  return token ? { ...extra, Authorization: `Bearer ${token}` } : { ...extra };
+}
+
+function reportUnauthorized(token: string | null): void {
+  // An old request that finishes after token rotation must not reopen the gate.
+  if (getToken() === token) unauthorizedListener?.();
 }
 
 /** GET a JSON endpoint with the bearer token attached; 401 → UnauthorizedError. */
@@ -86,13 +94,10 @@ async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
   const token = getToken();
   const res = await fetch(path, {
     signal,
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    headers: authHeaders(),
   });
   if (res.status === 401) {
-    // Only notify when the rejected token is still the current one: a
-    // request sent with the old token that 401s after the user saved a new
-    // one must not re-open the token gate they just cleared.
-    if (getToken() === token) unauthorizedListener?.();
+    reportUnauthorized(token);
     throw new UnauthorizedError(path);
   }
   if (!res.ok) throw new Error(`GET ${path}: HTTP ${res.status}`);
@@ -101,7 +106,7 @@ async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
 
 /* ---------- SSE plumbing (shared by connectLive and connectOverview) ---------- */
 
-/** How long to wait before replacing an EventSource the browser gave up on. */
+/** How long to wait before reopening a failed authenticated SSE fetch. */
 const REOPEN_DELAY_MS = 5000;
 
 /**
@@ -109,8 +114,7 @@ const REOPEN_DELAY_MS = 5000;
  * looks open (half-open connection after laptop sleep, a NAT timeout, or a
  * proxy whose upstream died). This is the default; streams that learn the
  * server's sample interval raise the threshold to max(STALL_MS, 4 ×
- * intervalMs) so slow sample rates (the server's `: ping` comment heartbeat
- * is invisible to EventSource) don't false-disconnect.
+ * intervalMs) so slow sample rates do not false-disconnect.
  */
 const STALL_MS = 15_000;
 
@@ -126,8 +130,7 @@ interface StreamSpec {
 }
 
 /**
- * Open an SSE stream with manual recovery on top of EventSource's built-in
- * retries, which miss two failure modes:
+ * Open an authenticated Fetch-based SSE stream with manual recovery for:
  *
  *  - it gives up for good when the endpoint answers with a non-stream
  *    response (e.g. a reverse proxy returning 502 while the backend
@@ -138,24 +141,24 @@ interface StreamSpec {
  * Returns a close function.
  */
 function connectStream({ path, onState, events }: StreamSpec): () => void {
-  let es: EventSource | null = null;
+  let ctrl: AbortController | null = null;
   let retryTimer: number | null = null;
   let stallTimer: number | null = null;
   let stallMs = STALL_MS;
+  let generation = 0;
   let closed = false;
 
-  const clearRetry = () => {
-    if (retryTimer !== null) {
-      window.clearTimeout(retryTimer);
-      retryTimer = null;
-    }
+  const clearTimers = () => {
+    if (retryTimer !== null) window.clearTimeout(retryTimer);
+    if (stallTimer !== null) window.clearTimeout(stallTimer);
+    retryTimer = stallTimer = null;
   };
 
   const scheduleReopen = () => {
     if (closed || retryTimer !== null) return;
     retryTimer = window.setTimeout(() => {
       retryTimer = null;
-      open();
+      void open();
     }, REOPEN_DELAY_MS);
   };
 
@@ -165,53 +168,96 @@ function connectStream({ path, onState, events }: StreamSpec): () => void {
     stallTimer = window.setTimeout(() => {
       stallTimer = null;
       onState('reconnecting');
-      open();
+      ctrl?.abort();
     }, stallMs);
   };
 
-  // Raising the threshold re-arms immediately so the new cadence applies to
-  // the gap after the event that reported it, not just the one after that.
   const setStallMs = (ms: number) => {
     stallMs = Math.max(STALL_MS, ms);
     armStallWatchdog();
   };
 
-  // Replace, never accumulate: whichever path gets here (initial connect,
-  // stall watchdog, retry timer) first tears down the old stream and any
-  // pending retry, so at most one EventSource is alive at a time.
-  const open = () => {
-    if (closed) return;
-    clearRetry();
-    es?.close();
-    es = new EventSource(sseUrl(path));
-    armStallWatchdog();
+  const consume = async (body: ReadableStream<Uint8Array>) => {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let eventName = '';
+    let data: string[] = [];
 
-    es.onopen = () => onState('open');
-    es.onerror = () => {
-      onState('reconnecting');
-      if (es?.readyState === EventSource.CLOSED) scheduleReopen();
+    const processLine = (raw: string) => {
+      const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+      if (line === '') {
+        if (data.length > 0) events[eventName]?.(data.join('\n'), setStallMs);
+        eventName = '';
+        data = [];
+      } else if (line.startsWith('event:')) {
+        eventName = line.slice(6).trimStart();
+      } else if (line.startsWith('data:')) {
+        data.push(line.slice(5).trimStart());
+      }
     };
 
-    for (const [name, handle] of Object.entries(events)) {
-      es.addEventListener(name, (e) => {
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
         armStallWatchdog();
-        handle((e as MessageEvent).data as string, setStallMs);
+        buffer += decoder.decode(value, { stream: true });
+        if (buffer.length > 1 << 20) throw new Error('event stream buffer limit exceeded');
+        let newline = buffer.indexOf('\n');
+        while (newline >= 0) {
+          processLine(buffer.slice(0, newline));
+          buffer = buffer.slice(newline + 1);
+          newline = buffer.indexOf('\n');
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  };
+
+  const open = async () => {
+    if (closed) return;
+    ctrl?.abort();
+    const current = ++generation;
+    const request = new AbortController();
+    ctrl = request;
+    const token = getToken();
+    armStallWatchdog();
+    try {
+      const res = await fetch(path, {
+        signal: request.signal,
+        headers: authHeaders({ Accept: 'text/event-stream', 'Cache-Control': 'no-cache' }),
+        cache: 'no-store',
       });
+      if (closed || current !== generation) return;
+      if (res.status === 401) {
+        reportUnauthorized(token);
+        throw new UnauthorizedError(path);
+      }
+      const contentType = res.headers.get('Content-Type')?.toLowerCase() ?? '';
+      if (!res.ok || !contentType.startsWith('text/event-stream') || !res.body) {
+        throw new Error(`GET ${path}: invalid event stream response (${res.status})`);
+      }
+      onState('open');
+      await consume(res.body);
+    } catch (err) {
+      if (closed || current !== generation) return;
+      if (err instanceof UnauthorizedError) return;
+      onState('reconnecting');
+    } finally {
+      if (!closed && current === generation) scheduleReopen();
     }
   };
 
   onState('connecting');
-  open();
-
+  void open();
   return () => {
     closed = true;
-    clearRetry();
-    if (stallTimer !== null) {
-      window.clearTimeout(stallTimer);
-      stallTimer = null;
-    }
-    es?.close();
-    es = null;
+    generation += 1;
+    clearTimers();
+    ctrl?.abort();
+    ctrl = null;
   };
 }
 

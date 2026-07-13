@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -23,6 +24,48 @@ func newTestStore(t *testing.T) *Store {
 		}
 	})
 	return s
+}
+
+func TestOpenUsesPrivateFilesystemPermissions(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "data")
+	path := filepath.Join(dir, "owlwatch.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	for file, want := range map[string]os.FileMode{dir: 0o700, path: 0o600} {
+		info, err := os.Stat(file)
+		if err != nil {
+			t.Fatalf("Stat(%s): %v", file, err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s permissions = %04o, want %04o", file, got, want)
+		}
+	}
+}
+
+func TestOpenDoesNotChmodExistingParent(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "shared")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(filepath.Join(dir, "owlwatch.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Fatalf("existing parent permissions changed to %04o, want 0755", got)
+	}
 }
 
 // snap builds a GPU-less snapshot with two disk mounts.

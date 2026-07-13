@@ -5,8 +5,8 @@ is the architecture contract the code was built against.
 
 ## Prerequisites
 
-- Go 1.24+
-- Node 20+
+- Go 1.26.5+
+- Node 22+
 
 ## Build order matters
 
@@ -27,7 +27,7 @@ The Makefile handles this ordering for you.
 |---|---|
 | `make build` | Build the web UI, then the `owlwatch` binary |
 | `make web` | Build only the web UI (`npm ci` + `npm run build`) |
-| `make test` | Web build (includes `tsc` type-check), `go vet`, `go test ./...` |
+| `make test` | Web build and unit tests, `go vet`, race-enabled Go tests |
 | `make run` | Build everything and run `./owlwatch` |
 | `make docker` | Build the Docker image as `owlwatch:dev` |
 | `make clean` | Remove the binary and `web/dist` |
@@ -38,9 +38,9 @@ The Makefile handles this ordering for you.
 make test
 ```
 
-Or directly (after a web build): `go vet ./... && go test ./...`. The frontend
-has no separate test suite; `npm run build` runs `tsc`, which is the
-type-level check CI enforces.
+Or directly (after a web build): `go vet ./... && go test ./...`. Run the
+frontend unit suite with `npm test --prefix web`; `npm run build --prefix web`
+also runs the TypeScript type check.
 
 For day-to-day development run `go run ./cmd/owlwatch` in one terminal and
 `cd web && npm run dev` in another — Vite serves on 5173 and proxies `/api`
@@ -57,3 +57,5 @@ to 8080.
   `/api/history` aliases are the peer-facing surface hubs consume — frozen,
   do not change them.
 - Keep PRs focused; small and reviewable beats big and clever.
+- Never include access tokens, private peer URLs, hostnames, generated
+  databases, or unsanitized host telemetry in commits, issues, or logs.

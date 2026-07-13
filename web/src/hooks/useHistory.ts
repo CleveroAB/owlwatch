@@ -11,6 +11,8 @@ export interface HistoryState {
   stale: boolean;
   /** True when the last fetch failed (server unreachable, bad response). */
   error: boolean;
+  /** Range that produced points; null until the first successful fetch. */
+  range: RangeKey | null;
 }
 
 /**
@@ -21,7 +23,7 @@ export interface HistoryState {
  * carry-over never crosses servers.
  */
 export function useHistory(serverId: string, range: RangeKey): HistoryState {
-  const [state, setState] = useState<HistoryState>({ points: null, stale: false, error: false });
+  const [state, setState] = useState<HistoryState>({ points: null, stale: false, error: false, range: null });
   const ctrlRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -35,13 +37,13 @@ export function useHistory(serverId: string, range: RangeKey): HistoryState {
       fetchHistory(serverBase(serverId), range, ctrl.signal)
         .then((res) => {
           if (disposed || ctrlRef.current !== ctrl) return;
-          setState({ points: res.points ?? [], stale: false, error: false });
+          setState({ points: res.points ?? [], stale: false, error: false, range });
         })
         .catch(() => {
           if (disposed || ctrl.signal.aborted) return;
           // Keep whatever we had; un-dim so a dead backend doesn't leave a
           // permanently faded chart. The next 60s tick retries.
-          setState((s) => ({ points: s.points ?? [], stale: false, error: true }));
+          setState((s) => ({ ...s, points: s.points ?? [], stale: false, error: true }));
         });
     };
 

@@ -11,8 +11,9 @@ web:
 	npm run build --prefix web
 
 test: web
+	npm test --prefix web
 	go vet ./...
-	go test ./...
+	go test ./... -race
 
 run: build
 	./owlwatch

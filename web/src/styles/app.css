@@ -124,8 +124,8 @@ h2 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -266,6 +266,7 @@ h2 {
   color: var(--ink-2);
   font-size: 13px;
   padding: 5px 13px;
+  min-height: 44px;
   border-radius: 999px;
   cursor: pointer;
 }
@@ -465,6 +466,9 @@ table.data {
 /* ---------- hub header extras (server pages on a hub only) ---------- */
 
 .back-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   font-size: 13px;
   color: var(--ink-2);
   text-decoration: none;
@@ -496,7 +500,7 @@ table.data {
 
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: 14px;
 }
 
@@ -512,20 +516,40 @@ table.data {
   border-color: color-mix(in srgb, var(--ink) 25%, transparent);
 }
 
-/* Dim, don't hide: offline cards keep their last-known values. */
-.server-card.offline {
-  opacity: 0.6;
+/* Dim only decorative data marks so offline text remains WCAG-legible. */
+.server-card.offline .spark,
+.server-card.offline .meter {
+  opacity: 0.5;
 }
 
 .server-card-head {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 8px;
   min-width: 0;
 }
 
+.server-identity {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.server-identity .chip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 55%;
+}
+
 .server-card-head .conn {
   font-size: 12px;
+  justify-content: flex-end;
+  white-space: normal;
+  text-align: right;
+  max-width: 140px;
 }
 
 .server-name {
@@ -534,6 +558,7 @@ table.data {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 3ch;
 }
 
 .server-card-meta {
@@ -653,6 +678,32 @@ table.data {
   color: var(--ink-muted);
   text-align: center;
 }
+
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.boot-state {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+}
+
+.boot-state p { color: var(--ink-2); }
+.boot-state button { min-height: 44px; padding: 8px 16px; }
 
 /* ---------- responsive ---------- */
 

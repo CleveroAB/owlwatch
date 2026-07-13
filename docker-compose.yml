@@ -6,17 +6,22 @@
 # filesystem bind-mounted at /host/rootfs.
 services:
   owlwatch:
-    build: .
+    image: ghcr.io/cleveroab/owlwatch:${OWLWATCH_VERSION:-1.0.0}
     container_name: owlwatch
     # Host port is overridable so a busy :8080 doesn't block deployment
     # (e.g. OWLWATCH_HOST_PORT=7676 in the environment or an .env file).
     # OWLWATCH_PORT moves the port INSIDE the container too (rarely needed —
     # for host-port conflicts OWLWATCH_HOST_PORT alone is enough); it is wired
     # into both the mapping and the server env so they can't drift apart.
-    ports: ["${OWLWATCH_HOST_PORT:-8080}:${OWLWATCH_PORT:-8080}"]
+    ports: ["127.0.0.1:${OWLWATCH_HOST_PORT:-8080}:${OWLWATCH_PORT:-8080}"]
     restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
     environment:
       OWLWATCH_PORT: ${OWLWATCH_PORT:-8080}
+      OWLWATCH_LISTEN: 0.0.0.0
       HOST_PROC: /host/proc
       HOST_SYS: /host/sys
       HOST_ETC: /host/etc
@@ -30,8 +35,8 @@ services:
       # To monitor several servers, deploy this same compose file on each one
       # and make ONE instance the hub by setting OWLWATCH_PEERS (see README,
       # "Monitoring multiple servers"), e.g.
-      # OWLWATCH_PEERS=web1=http://10.0.0.11:8080,db1=http://10.0.0.12:8080
-      # in its .env. Set the same OWLWATCH_TOKEN on every instance.
+      # OWLWATCH_PEERS=web1=https://web1.example.com|WEB1_TOKEN
+      # in its .env. Prefer a distinct strong token for each peer.
       OWLWATCH_PEERS: ${OWLWATCH_PEERS:-}
     volumes:
       - /proc:/host/proc:ro

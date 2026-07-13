@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and deployment help
+    url: https://github.com/CleveroAB/owlwatch/discussions
+    about: Ask the community before opening a bug.
+  - name: Report a security vulnerability
+    url: https://github.com/CleveroAB/owlwatch/security/advisories/new
+    about: Report vulnerabilities privately; never open a public issue.

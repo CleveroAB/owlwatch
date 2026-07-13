@@ -1,5 +1,5 @@
 import { useEffect, useReducer } from 'react';
-import type { ConnectionState } from '../lib/api';
+import { clearToken, getToken, type ConnectionState } from '../lib/api';
 import { formatUptime } from '../lib/format';
 import type { HostInfo, ServerSummary } from '../lib/types';
 import type { Theme } from '../hooks/useTheme';
@@ -69,6 +69,20 @@ export function Header({
       )}
       <div className="spacer" />
       <ConnStatus status={status} />
+      {getToken() && (
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => {
+            clearToken();
+            window.location.reload();
+          }}
+          aria-label="Forget access token"
+          title="Forget access token"
+        >
+          <LogoutIcon />
+        </button>
+      )}
       <button
         type="button"
         className="icon-btn"
@@ -130,6 +144,26 @@ function MoonIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M13.3 10.1A5.9 5.9 0 0 1 5.9 2.7a5.9 5.9 0 1 0 7.4 7.4z" />
+    </svg>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      aria-hidden="true"
+    >
+      <path
+        d="M6.5 2.5H3.8a1.3 1.3 0 0 0-1.3 1.3v8.4a1.3 1.3 0 0 0 1.3 1.3h2.7M9.5 5l3 3-3 3M12.5 8H6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

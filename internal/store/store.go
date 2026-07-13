@@ -61,8 +61,17 @@ type Store struct {
 // Open creates the parent directory if needed, opens (or creates) the SQLite
 // database at path and migrates the schema.
 func Open(path string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("store: create db directory: %w", err)
+	dir := filepath.Dir(path)
+	if _, err := os.Stat(dir); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("store: inspect db directory: %w", err)
+		}
+		// Apply private permissions only to directories we create. An existing
+		// parent may be shared (for example /tmp or a mounted volume) and must
+		// never be chmodded as a side effect of opening one database.
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("store: create db directory: %w", err)
+		}
 	}
 
 	// modernc.org/sqlite runs each _pragma query parameter as a PRAGMA
@@ -83,6 +92,12 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("store: migrate schema: %w", err)
+	}
+	for _, file := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Chmod(file, 0o600); err != nil && !os.IsNotExist(err) {
+			db.Close()
+			return nil, fmt.Errorf("store: secure %s: %w", file, err)
+		}
 	}
 	return &Store{db: db}, nil
 }

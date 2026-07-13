@@ -30,8 +30,8 @@ as a change to the wire format.
 - **History path:** a persistence pump (in `main.go`) subscribes to the
   collector and inserts one row every 10s. Queries aggregate into buckets
   server-side (≤ ~400 points per response). Retention 30 days, pruned hourly.
-- **No auth in v1** — intended for LAN / behind a reverse proxy. The README
-  calls this out prominently.
+- **Optional bearer auth** protects every data API route. Deployments remain
+  loopback-only by default and must use TLS or a trusted VPN across networks.
 
 Repository layout:
 
@@ -49,15 +49,18 @@ Repository layout:
 
 | Var | Default | Meaning |
 |---|---|---|
-| `OWLWATCH_PORT` | `8080` | HTTP listen port |
+| `OWLWATCH_LISTEN` | `127.0.0.1` | HTTP listen IP; container sets `0.0.0.0` internally and Compose publishes to host loopback |
+| `OWLWATCH_PORT` | `8080` | HTTP listen port (1–65535) |
 | `OWLWATCH_DB` | `./data/owlwatch.db` | SQLite path (Docker sets `/data/owlwatch.db`) |
-| `OWLWATCH_SAMPLE_INTERVAL` | `2s` | live sampling cadence (Go duration) |
-| `OWLWATCH_PERSIST_INTERVAL` | `10s` | history write cadence |
-| `OWLWATCH_RETENTION_DAYS` | `30` | history retention |
+| `OWLWATCH_SAMPLE_INTERVAL` | `2s` | live sampling cadence, 250ms–1m (Go duration) |
+| `OWLWATCH_PERSIST_INTERVAL` | `10s` | history write cadence, at least sample interval and at most 1h |
+| `OWLWATCH_RETENTION_DAYS` | `30` | history retention, 1–3650 days |
 | `OWLWATCH_ROOTFS` | *(empty)* | container mode: host `/` bind-mounted here (e.g. `/host/rootfs`) |
 | `OWLWATCH_ALLOWED_HOSTS` | *(empty)* | extra Host-header names to accept (comma-separated). IP-literal hosts and `localhost` are always accepted; other names are rejected with 421 to block DNS rebinding |
 | `OWLWATCH_PEERS` | *(empty)* | federation: `name=url[\|token]` pairs — makes this instance a hub (§9) |
-| `OWLWATCH_TOKEN` | *(empty)* | require a bearer/query token on all `/api/*` routes; also the default outgoing peer token (§9) |
+| `OWLWATCH_TOKEN` | *(empty)* | require an `Authorization: Bearer` header on all `/api/*` routes; minimum 16 characters; also the fallback outgoing peer token (§9) |
+| `OWLWATCH_MAX_SSE_CLIENTS` | `128` | process-wide concurrent live-stream limit (1–10000) |
+| `OWLWATCH_MAX_HISTORY_REQUESTS` | `16` | process-wide concurrent history-request limit (1–1000) |
 | `HOST_PROC`, `HOST_SYS`, `HOST_ETC`, `HOST_VAR`, `HOST_RUN` | *(unset)* | standard gopsutil redirects; set by docker-compose to `/host/proc` etc. |
 
 Config parsing lives in `cmd/owlwatch/main.go` (plain `os.Getenv` + defaults,
@@ -351,8 +354,8 @@ chart and the disk tile) so a mount keeps its hue across range switches.
   arch as a muted chip, uptime ticking live (computed from `bootTime`),
   connection status, theme toggle button.
 - **Connection status is a status, not decoration:** green dot + "Live" when
-  SSE is open; amber dot + "Reconnecting…" when the EventSource errors (it
-  auto-reconnects). Icon + label, never color alone.
+  SSE is open; amber dot + "Reconnecting…" when the authenticated fetch stream
+  errors (the client reconnects). Icon + label, never color alone.
 
 ### 5.4 Stat tiles (dataviz stat-tile contract)
 
@@ -433,9 +436,9 @@ localStorage.
 
 ### 5.7 Data layer (`src/lib/api.ts`)
 
-- `connectLive(handlers)`: wraps `EventSource('/api/live')`; parses `hello`
-  and `snapshot` events; exposes connection state (open/reconnecting);
-  EventSource reconnects automatically — reflect state via `onerror`/`onopen`.
+- `connectLive(handlers)`: opens an authenticated Fetch streaming request to
+  `/api/live`; parses `hello` and `snapshot` events; exposes connection state
+  (open/reconnecting) and reconnects after failures.
   Keep a client-side ring buffer (cap ~150) feeding tiles + sparklines.
 - `fetchHistory(range)`: plain fetch, typed `HistoryResponse`; abort the
   in-flight request when the range changes (AbortController).
@@ -454,17 +457,18 @@ localStorage.
   touching styles.
 - `index.html`: title `owlwatch · <set from hostname at runtime>`, owl 🦉
   favicon via inline SVG data URI, `<meta name="color-scheme" content="dark light">`,
-  theme-init inline script (reads localStorage before first paint — no flash).
+  external `/theme.js` bootstrap (reads localStorage before first paint — no
+  flash, while keeping `script-src` free of `unsafe-inline`).
 
 ## 6. Docker & deployment
 
 Multi-stage `Dockerfile`:
 
-1. `node:20-alpine` — `COPY web/`, `npm ci`, `npm run build`.
-2. `golang:1.24-alpine` — copy module files + source, copy `web/dist` from
+1. `node:22-alpine` — `COPY web/`, `npm ci`, `npm run build`.
+2. `golang:1.26.5-alpine` — copy module files + source, copy `web/dist` from
    stage 1 into `web/dist`, `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w
    -X main.version=$VERSION" ./cmd/owlwatch`. `ARG VERSION=dev`.
-3. Final: `gcr.io/distroless/base-debian12` (glibc present for the injected
+3. Final: `gcr.io/distroless/base-debian12:nonroot` (glibc present for the injected
    `nvidia-smi`; no shell). Copy binary. `ENV OWLWATCH_DB=/data/owlwatch.db`,
    `EXPOSE 8080`, `VOLUME /data`,
    `HEALTHCHECK --interval=30s --timeout=5s CMD ["/owlwatch","-healthcheck"]`
@@ -476,10 +480,13 @@ Multi-stage `Dockerfile`:
 ```yaml
 services:
   owlwatch:
-    build: .
+    image: ghcr.io/cleveroab/owlwatch:1.0.0
     container_name: owlwatch
-    ports: ["8080:8080"]
+    ports: ["127.0.0.1:8080:8080"]
     restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     environment:
       HOST_PROC: /host/proc
       HOST_SYS: /host/sys
@@ -499,7 +506,7 @@ volumes:
 
 Prebuilt images are published to `ghcr.io/cleveroab/owlwatch` from `main` by
 CI. The `README.md` is the user-facing companion to this document: quick start
-(compose + prebuilt image), GPU setup, the no-auth warning, the §2 config
+(compose + prebuilt image), GPU setup, secure exposure guidance, the §2 config
 table, local development, API reference and license. Keep the two documents
 consistent — the code is the truth, this document explains it, the README
 sells and operates it.
@@ -508,7 +515,7 @@ sells and operates it.
 
 ## 7. Dev workflow
 
-- Backend: `go run ./cmd/owlwatch` (macOS works natively — no GPU, that's fine).
+- Backend: `go run ./cmd/owlwatch` on Linux.
 - Frontend: `cd web && npm run dev` → Vite on 5173 proxying `/api` to 8080.
 - Full build: `make build` (frontend first — `web/dist` is gitignored and
   `go:embed` needs it — then the Go binary); `make run` builds and runs it.
@@ -519,10 +526,9 @@ sells and operates it.
 Network I/O metrics, per-process lists, alerts/notifications, AMD/Intel/Apple
 GPU support (NVIDIA only), historical per-core CPU, config files. The GPU
 history aggregates across cards (per-GPU history is future work). Multi-host
-monitoring and token auth were non-goals for v1.0 and were added in v1.1 as
-federation — see §9.
+monitoring and token auth are included in the public v1 contract — see §9.
 
-## 9. Federation (v1.1): hub mode, multiple servers, token auth
+## 9. Federation: hub mode, multiple servers, token auth
 
 Every instance runs the same binary and remains a fully working standalone
 dashboard. An instance becomes a **hub** when `OWLWATCH_PEERS` is set: it
@@ -536,7 +542,7 @@ storage: history stays on each peer and the hub proxies range queries.
 | Var | Default | Meaning |
 |---|---|---|
 | `OWLWATCH_PEERS` | *(empty)* | comma-separated `name=url` pairs, e.g. `web1=http://10.0.0.11:8080,db1=https://db.example.com\|s3cret`. An optional `\|token` suffix per peer overrides `OWLWATCH_TOKEN` for that peer's outgoing requests. Setting this makes the instance a hub. |
-| `OWLWATCH_TOKEN` | *(empty)* | when set, every `/api/*` route (except nothing under /api; `/healthz` is NOT under /api and stays open) requires `Authorization: Bearer <token>` or `?token=<token>`. Also used as the default outgoing token for peers. |
+| `OWLWATCH_TOKEN` | *(empty)* | when set, every `/api/*` route (`/healthz` stays open) requires an `Authorization: Bearer` header. Also used as the fallback outgoing token for peers. |
 
 Peer **names** become server IDs: lowercased, must match `[a-z0-9-]{1,32}`
 after lowering, must be unique, and must not be the reserved words `local` or
@@ -546,9 +552,9 @@ Invalid `OWLWATCH_PEERS` is a fatal startup error — fail fast, not silently.
 
 ### 9.2 Auth semantics
 
-- Token check: constant-time compare (`crypto/subtle`). Accepted as
-  `Authorization: Bearer <t>` or query param `token=<t>` (EventSource cannot
-  set headers). 401 JSON `{"error":"unauthorized"}` on failure.
+- Token check: constant-time compare (`crypto/subtle`) of an
+  `Authorization: Bearer` header. URL query credentials are rejected. A
+  mismatch returns 401 JSON `{"error":"unauthorized"}`.
 - Applies to ALL `/api/` routes when `OWLWATCH_TOKEN` is set. `/healthz` and
   the static UI stay open (the UI shell is public; the data behind it is not).
 - The UI handles 401 with a token gate (see §9.5); the token the user enters
@@ -602,7 +608,8 @@ Behavior requirements:
   reset the stall timer). Stall timer: no bytes for 45s → reconnect.
 - `hello` → cache HostInfo + intervalMs, seed the ring from `recent`.
   `snapshot` → update latest + ring, broadcast Event with Snapshot.
-- Connect success → broadcast `Online: true`; any disconnect/error →
+- A valid `hello` → broadcast `Online: true`; a bare HTTP 200 is not enough.
+  Any disconnect/error →
   `Online: false`, then retry with exponential backoff 2s→30s (jitter).
 - One shared `http.Client` with `CheckRedirect` returning an error; separate
   timeout discipline: no overall timeout on the SSE request (streaming), 15s
@@ -672,7 +679,7 @@ that server's full dashboard.
 - On boot fetch `/api/servers`. 401 → **token gate**: a centered card (owl
   mark, one password input "Access token", save button); stores to
   localStorage `owlwatch-token`, retries. Every fetch sends
-  `Authorization: Bearer`; EventSource URLs get `?token=`.
+  `Authorization: Bearer`, including Fetch-based SSE streams.
 - **Standalone invariant:** when `/api/servers` returns exactly one local
   entry, the app renders the v1 dashboard EXACTLY as today — no overview, no
   picker, no visual change. This must remain pixel-identical.
@@ -682,8 +689,8 @@ that server's full dashboard.
   alone), uptime, compact one-line meters for CPU / Mem / Disk(fullest) /
   GPU-if-present with current values, and a 60-point CPU sparkline that
   accumulates from the live stream. Data: one `/api/overview/live`
-  EventSource for the whole page. Clicking a card → `#/s/{id}`. Offline cards
-  dim to 60% with their last-known values and show since-when.
+  authenticated Fetch SSE stream for the whole page. Clicking a card →
+  `#/s/{id}`. Offline cards retain legible text and show since-when.
 - **Server page**: the existing v1 dashboard componentry, parameterized by
   server id — all data via `/api/servers/{id}/...`. Header gains (hub only):
   a back-to-overview link (`← Overview`) and a server dropdown (native

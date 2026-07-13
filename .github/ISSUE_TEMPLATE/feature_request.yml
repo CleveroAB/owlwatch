@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest a focused improvement to owlwatch
+title: "[Feature]: "
+labels: [enhancement, triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem or operational gap should owlwatch solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the smallest useful solution and any alternatives considered.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Deployment context
+      description: Standalone or hub, host OS, container/native, and fleet size if relevant.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: This request keeps owlwatch focused on lightweight host monitoring.
+          required: true

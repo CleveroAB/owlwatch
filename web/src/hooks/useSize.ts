@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 
 /** Observed content width of the referenced element (0 until first measure). */
-export function useSize<T extends HTMLElement>(): { ref: RefObject<T>; width: number } {
+export function useSize<T extends HTMLElement>(): { ref: RefObject<T | null>; width: number } {
   const ref = useRef<T>(null);
   const [width, setWidth] = useState(0);
 

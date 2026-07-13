@@ -10,15 +10,6 @@ import { ServerPage } from './pages/ServerPage';
 /** How often to re-try /api/servers while the backend is unreachable. */
 const BOOT_RETRY_MS = 10_000;
 
-/**
- * When the bootstrap call fails outright (backend down/restarting) we behave
- * like v1: render the local dashboard, whose own SSE layer shows the amber
- * reconnecting state, and keep polling /api/servers in the background.
- */
-const LOCAL_FALLBACK: ServerSummary[] = [
-  { id: 'local', name: 'local', local: true, online: true, lastSeen: 0, intervalMs: 0 },
-];
-
 type Boot =
   | { phase: 'loading' }
   | { phase: 'unauthorized' }
@@ -88,12 +79,34 @@ export default function App() {
     setAttempt((a) => a + 1);
   }, []);
 
-  if (boot.phase === 'loading') return null;
+  const updateServers = useCallback((servers: ServerSummary[]) => {
+    setBoot({ phase: 'ready', servers });
+  }, []);
+
+  if (boot.phase === 'loading') {
+    return (
+      <main className="boot-state" aria-busy="true">
+        <h1>owlwatch</h1>
+        <p>Connecting to the server…</p>
+      </main>
+    );
+  }
   if (boot.phase === 'unauthorized') {
     return <TokenGate failed={gateFailed} onSubmit={saveToken} />;
   }
+  if (boot.phase === 'error') {
+    return (
+      <main className="boot-state" role="alert">
+        <h1>owlwatch</h1>
+        <p>Unable to reach the Owlwatch server.</p>
+        <button type="button" onClick={() => setAttempt((a) => a + 1)}>
+          Retry now
+        </button>
+      </main>
+    );
+  }
 
-  const servers = boot.phase === 'ready' ? boot.servers : LOCAL_FALLBACK;
+  const servers = boot.servers;
   const standalone = servers.length === 1 && servers[0].local;
 
   if (standalone) {
@@ -110,7 +123,7 @@ export default function App() {
     );
   }
 
-  if (route.page === 'server' && servers.some((s) => s.id === route.id)) {
+  if (route.page === 'server') {
     return (
       <ServerPage
         key={route.id}
@@ -123,6 +136,13 @@ export default function App() {
     );
   }
 
-  // `#/`, plus any unknown server id, lands on the overview.
-  return <Overview servers={servers} theme={theme} onToggleTheme={toggleTheme} />;
+  // The hub's default route lands on the overview.
+  return (
+    <Overview
+      servers={servers}
+      theme={theme}
+      onToggleTheme={toggleTheme}
+      onServersChange={updateServers}
+    />
+  );
 }

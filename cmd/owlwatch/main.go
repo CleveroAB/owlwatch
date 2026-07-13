@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,6 +29,7 @@ import (
 var version = "dev"
 
 type appConfig struct {
+	listenAddress   string
 	port            int
 	dbPath          string
 	sampleInterval  time.Duration
@@ -37,6 +39,8 @@ type appConfig struct {
 	allowedHosts    []string
 	peers           []peers.Peer // OWLWATCH_PEERS: non-empty makes this instance a hub (DESIGN.md §9)
 	token           string       // OWLWATCH_TOKEN: API auth + default outgoing peer token
+	maxSSEClients   int
+	maxHistory      int
 }
 
 func main() {
@@ -109,11 +113,11 @@ func run(cfg appConfig) error {
 	if cfg.token != "" {
 		auth = "on"
 	}
-	log.Printf("owlwatch %s listening on :%d (db: %s, gpu: %s, peers: %d, auth: %s)",
-		version, cfg.port, cfg.dbPath, gpu, len(cfg.peers), auth)
+	log.Printf("owlwatch %s listening on %s (db: %s, gpu: %s, peers: %d, auth: %s)",
+		version, net.JoinHostPort(cfg.listenAddress, strconv.Itoa(cfg.port)), cfg.dbPath, gpu, len(cfg.peers), auth)
 
 	srv := server.New(server.Config{
-		Addr:           fmt.Sprintf(":%d", cfg.port),
+		Addr:           net.JoinHostPort(cfg.listenAddress, strconv.Itoa(cfg.port)),
 		Collector:      col,
 		Store:          st,
 		Host:           host,
@@ -121,6 +125,8 @@ func run(cfg appConfig) error {
 		AllowedHosts:   cfg.allowedHosts,
 		Peers:          peersClient,
 		Token:          cfg.token,
+		MaxSSEClients:  cfg.maxSSEClients,
+		MaxHistory:     cfg.maxHistory,
 	})
 	serveErr := srv.ListenAndServe(ctx)
 
@@ -210,12 +216,21 @@ func runHealthcheck(port int) int {
 // defaults and rejecting unparseable values.
 func loadConfig() (appConfig, error) {
 	cfg := appConfig{
+		listenAddress:   "127.0.0.1",
 		port:            8080,
 		dbPath:          "./data/owlwatch.db",
 		sampleInterval:  2 * time.Second,
 		persistInterval: 10 * time.Second,
 		retentionDays:   30,
 		rootfs:          os.Getenv("OWLWATCH_ROOTFS"),
+		maxSSEClients:   128,
+		maxHistory:      16,
+	}
+	if v := os.Getenv("OWLWATCH_LISTEN"); v != "" {
+		if net.ParseIP(v) == nil {
+			return cfg, fmt.Errorf("OWLWATCH_LISTEN: want an IP address, got %q", v)
+		}
+		cfg.listenAddress = v
 	}
 	if v := os.Getenv("OWLWATCH_PORT"); v != "" {
 		p, err := strconv.Atoi(v)
@@ -234,10 +249,16 @@ func loadConfig() (appConfig, error) {
 	if cfg.persistInterval, err = envDuration("OWLWATCH_PERSIST_INTERVAL", cfg.persistInterval); err != nil {
 		return cfg, err
 	}
+	if cfg.sampleInterval < 250*time.Millisecond || cfg.sampleInterval > time.Minute {
+		return cfg, fmt.Errorf("OWLWATCH_SAMPLE_INTERVAL: want 250ms..1m, got %s", cfg.sampleInterval)
+	}
+	if cfg.persistInterval < cfg.sampleInterval || cfg.persistInterval > time.Hour {
+		return cfg, fmt.Errorf("OWLWATCH_PERSIST_INTERVAL: want sample interval..1h, got %s", cfg.persistInterval)
+	}
 	if v := os.Getenv("OWLWATCH_RETENTION_DAYS"); v != "" {
 		d, err := strconv.Atoi(v)
-		if err != nil || d < 1 {
-			return cfg, fmt.Errorf("OWLWATCH_RETENTION_DAYS: want a positive integer, got %q", v)
+		if err != nil || d < 1 || d > 3650 {
+			return cfg, fmt.Errorf("OWLWATCH_RETENTION_DAYS: want 1..3650, got %q", v)
 		}
 		cfg.retentionDays = d
 	}
@@ -253,10 +274,31 @@ func loadConfig() (appConfig, error) {
 	// invalid OWLWATCH_PEERS must be a fatal startup error, never a silent
 	// skip.
 	cfg.token = os.Getenv("OWLWATCH_TOKEN")
+	if cfg.token != "" && len(cfg.token) < 16 {
+		return cfg, fmt.Errorf("OWLWATCH_TOKEN: must be at least 16 characters when set")
+	}
 	if cfg.peers, err = peers.ParsePeers(os.Getenv("OWLWATCH_PEERS"), cfg.token); err != nil {
 		return cfg, fmt.Errorf("OWLWATCH_PEERS: %w", err)
 	}
+	if cfg.maxSSEClients, err = envInt("OWLWATCH_MAX_SSE_CLIENTS", cfg.maxSSEClients, 1, 10000); err != nil {
+		return cfg, err
+	}
+	if cfg.maxHistory, err = envInt("OWLWATCH_MAX_HISTORY_REQUESTS", cfg.maxHistory, 1, 1000); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
+}
+
+func envInt(key string, def, min, max int) (int, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < min || n > max {
+		return def, fmt.Errorf("%s: want %d..%d, got %q", key, min, max, v)
+	}
+	return n, nil
 }
 
 func envDuration(key string, def time.Duration) (time.Duration, error) {
