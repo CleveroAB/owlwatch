@@ -44,6 +44,32 @@ The host root mount must use `ro,rslave`. Without `rslave`, filesystems mounted 
 
 Persist `/data` with the named volume shown in the supplied Compose file. Verify `OWLWATCH_DB` points inside that volume (`/data/owlwatch.db` in the image). Deleting the volume intentionally resets history.
 
+## Startup fails with “readonly database (1544)”
+
+```
+owlwatch: open store /data/owlwatch.db: store: /data is not writable
+(uid 65532/gid 65532, directory owned by 0:0 mode 0755): permission denied
+```
+
+The container runs as the distroless `nonroot` user (uid 65532). The image
+ships `/data` owned by that user, and Docker copies the ownership onto a
+**fresh** named volume — but not onto one that already has content. A volume
+created by a pre-1.0 release, which ran as root, therefore stays owned by
+`0:0` and the nonroot process cannot create the database or its `-wal`/`-shm`
+sidecars.
+
+Fix the ownership of the existing volume on the host, keeping your history:
+
+```sh
+docker volume inspect <volume> --format '{{.Mountpoint}}'
+sudo chown -R 65532:65532 "$(docker volume inspect <volume> --format '{{.Mountpoint}}')"
+```
+
+Find the volume name with `docker volume ls | grep owlwatch`; platforms that
+namespace their resources (Coolify, for example) prefix it with a project id.
+Restart the container afterwards. Discarding the history instead — deleting
+the volume so a fresh, correctly-owned one is created — also works.
+
 ## The container is unhealthy immediately after startup
 
 The health endpoint remains unavailable until the first sample arrives. Wait several sample intervals, then inspect:
