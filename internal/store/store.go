@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" database/sql driver
@@ -73,6 +74,15 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("store: create db directory: %w", err)
 		}
 	}
+	// An existing directory may not be writable by us — the common container
+	// misconfiguration is a named volume created by an earlier root-running
+	// image and then reused by the nonroot one, which leaves /data owned by
+	// 0:0. SQLite would fail deep in the first write with
+	// SQLITE_READONLY_DIRECTORY (1544), a code that names neither the
+	// directory nor the uid. Probe up front instead.
+	if err := checkWritable(dir); err != nil {
+		return nil, err
+	}
 
 	// modernc.org/sqlite runs each _pragma query parameter as a PRAGMA
 	// statement on every new pool connection. Without a "file:" prefix the
@@ -100,6 +110,31 @@ func Open(path string) (*Store, error) {
 		}
 	}
 	return &Store{db: db}, nil
+}
+
+// checkWritable verifies we can actually create files in dir — SQLite needs
+// that for the -wal and -shm sidecars, not just for the database file itself.
+// The error reports who we are and who owns the directory, since that pair is
+// what the fix turns on.
+func checkWritable(dir string) error {
+	f, err := os.CreateTemp(dir, ".owlwatch-write-probe-*")
+	if err == nil {
+		name := f.Name()
+		f.Close()
+		os.Remove(name)
+		return nil
+	}
+
+	detail := fmt.Sprintf("uid %d/gid %d", os.Geteuid(), os.Getegid())
+	if fi, statErr := os.Stat(dir); statErr == nil {
+		mode := fi.Mode().Perm()
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+			detail += fmt.Sprintf(", directory owned by %d:%d mode %#o", st.Uid, st.Gid, mode)
+		} else {
+			detail += fmt.Sprintf(", directory mode %#o", mode)
+		}
+	}
+	return fmt.Errorf("store: %s is not writable (%s): %w", dir, detail, err)
 }
 
 // Insert flattens one snapshot into the samples and disk_samples tables in a
