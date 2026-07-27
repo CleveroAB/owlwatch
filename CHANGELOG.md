@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `OWLWATCH_BIND` selects the host interface docker-compose publishes on. It still defaults to `127.0.0.1`, so reaching the dashboard from another machine is now a documented opt-in rather than a compose-file edit.
+
 ## [1.0.0] - 2026-07-12
 
 ### Added

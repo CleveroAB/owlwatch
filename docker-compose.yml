@@ -13,7 +13,12 @@ services:
     # OWLWATCH_PORT moves the port INSIDE the container too (rarely needed —
     # for host-port conflicts OWLWATCH_HOST_PORT alone is enough); it is wired
     # into both the mapping and the server env so they can't drift apart.
-    ports: ["127.0.0.1:${OWLWATCH_HOST_PORT:-8080}:${OWLWATCH_PORT:-8080}"]
+    # OWLWATCH_BIND is the host interface. It defaults to loopback so a fresh
+    # `docker compose up` never puts the dashboard on the network by accident;
+    # set OWLWATCH_BIND=0.0.0.0 to reach it from other machines. Do that only
+    # together with OWLWATCH_TOKEN (the API is unauthenticated without one) and
+    # OWLWATCH_ALLOWED_HOSTS listing the hostname you'll browse to.
+    ports: ["${OWLWATCH_BIND:-127.0.0.1}:${OWLWATCH_HOST_PORT:-8080}:${OWLWATCH_PORT:-8080}"]
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
