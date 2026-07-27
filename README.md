@@ -48,6 +48,14 @@ file: `OWLWATCH_HOST_PORT=7676 docker compose up -d` (or set
 `OWLWATCH_HOST_PORT` in your platform's environment settings — Coolify,
 Portainer, etc.). The port *inside* the container stays 8080.
 
+Compose publishes to `127.0.0.1` only, so out of the box the dashboard is
+reachable from the server itself and nowhere else. To reach it from another
+machine, set `OWLWATCH_BIND=0.0.0.0` — and when you do, set `OWLWATCH_TOKEN`
+(without one every `/api/*` route is unauthenticated) and list the hostname
+you'll browse to in `OWLWATCH_ALLOWED_HOSTS`, or requests will be rejected
+with a 421. Behind a reverse proxy, leave `OWLWATCH_BIND` alone and point the
+proxy at the container instead.
+
 ### Prebuilt image
 
 No clone needed — images are published to GitHub Container Registry by the
@@ -196,7 +204,7 @@ Everything is environment variables; the defaults are sensible.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `OWLWATCH_LISTEN` | `127.0.0.1` | HTTP listen address; the image uses `0.0.0.0` internally while Compose publishes only to host loopback |
+| `OWLWATCH_LISTEN` | `127.0.0.1` | HTTP listen address; the image uses `0.0.0.0` internally while Compose publishes only to host loopback (see `OWLWATCH_BIND` above) |
 | `OWLWATCH_PORT` | `8080` | HTTP listen port |
 | `OWLWATCH_DB` | `./data/owlwatch.db` | SQLite path (the Docker image sets `/data/owlwatch.db`) |
 | `OWLWATCH_SAMPLE_INTERVAL` | `2s` | live sampling cadence (Go duration syntax) |

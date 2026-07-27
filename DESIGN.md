@@ -49,7 +49,7 @@ Repository layout:
 
 | Var | Default | Meaning |
 |---|---|---|
-| `OWLWATCH_LISTEN` | `127.0.0.1` | HTTP listen IP; container sets `0.0.0.0` internally and Compose publishes to host loopback |
+| `OWLWATCH_LISTEN` | `127.0.0.1` | HTTP listen IP; container sets `0.0.0.0` internally and Compose publishes to host loopback unless `OWLWATCH_BIND` says otherwise |
 | `OWLWATCH_PORT` | `8080` | HTTP listen port (1–65535) |
 | `OWLWATCH_DB` | `./data/owlwatch.db` | SQLite path (Docker sets `/data/owlwatch.db`) |
 | `OWLWATCH_SAMPLE_INTERVAL` | `2s` | live sampling cadence, 250ms–1m (Go duration) |
