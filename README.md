@@ -5,8 +5,6 @@ binary serves an embedded React dashboard showing **CPU, GPU, RAM and disk** —
 live (updated every 2 seconds over SSE) and over time (SQLite history, 1 hour
 to 30 days). No agents, no external database, no config files.
 
-[![CI](https://github.com/CleveroAB/owlwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/CleveroAB/owlwatch/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/CleveroAB/owlwatch/actions/workflows/codeql.yml/badge.svg)](https://github.com/CleveroAB/owlwatch/actions/workflows/codeql.yml)
 [![Release](https://img.shields.io/github/v/release/CleveroAB/owlwatch)](https://github.com/CleveroAB/owlwatch/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
@@ -52,9 +50,9 @@ Portainer, etc.). The port *inside* the container stays 8080.
 
 ### Prebuilt image
 
-No clone needed — images are published to GitHub Container Registry by CI.
-Use `latest` for the newest stable release, pin `1.0`/`1.0.0` in controlled
-environments, or use `edge` to test the current `main` branch:
+No clone needed — images are published to GitHub Container Registry by the
+maintainers. Use `latest` for the newest stable release, pin `1.0`/`1.0.0` in
+controlled environments, or use `edge` to test the current `main` branch:
 
 ```sh
 docker run -d --name owlwatch \

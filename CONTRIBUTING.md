@@ -48,8 +48,10 @@ to 8080.
 
 ## Pull requests
 
-- `gofmt` your Go code (CI fails on unformatted files) and make sure
-  `make test` passes.
+- `gofmt` your Go code and make sure `make test` passes. Nothing checks this
+  automatically — there is no CI on this repository, so an unformatted or
+  failing branch is only caught in review. Paste the `make test` output in
+  your PR.
 - If your change alters any HTTP/SSE contract, config variable, or the shared
   data types (`internal/metrics/types.go`, `internal/metrics/federation.go` /
   `web/src/lib/types.ts`), update `DESIGN.md` in the same PR — it must stay

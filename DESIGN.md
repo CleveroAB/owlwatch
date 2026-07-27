@@ -505,7 +505,11 @@ volumes:
 ```
 
 Prebuilt images are published to `ghcr.io/cleveroab/owlwatch` from `main` by
-CI. The `README.md` is the user-facing companion to this document: quick start
+the maintainers, using `docker buildx build --platform linux/amd64,linux/arm64`
+against the three-stage `Dockerfile` described above. There is no CI on this
+repository — build, vet, test and publish are all manual.
+
+The `README.md` is the user-facing companion to this document: quick start
 (compose + prebuilt image), GPU setup, secure exposure guidance, the §2 config
 table, local development, API reference and license. Keep the two documents
 consistent — the code is the truth, this document explains it, the README

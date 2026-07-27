@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Removed
+
+- All GitHub Actions workflows: `ci.yml` (build, gofmt, vet, Go and web test suites), `codeql.yml` (code scanning), and `release.yml` (multi-architecture image publish to ghcr.io). Contributions are no longer checked automatically, and release images are built and pushed manually. The `github-actions` Dependabot ecosystem is dropped with them.
+
 ## [1.0.0] - 2026-07-12
 
 ### Added
