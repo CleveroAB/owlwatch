@@ -8,6 +8,11 @@ services:
   owlwatch:
     image: ghcr.io/cleveroab/owlwatch:${OWLWATCH_VERSION:-1.0.0}
     container_name: owlwatch
+    # The image runs as the distroless "nonroot" user (uid 65532) and creates
+    # /data owned by it. Docker copies that ownership onto a FRESH named
+    # volume only — a volume left over from an earlier root-running release
+    # stays root-owned, and owlwatch then fails to write its database. See
+    # docs/troubleshooting.md, "readonly database (1544)".
     # Host port is overridable so a busy :8080 doesn't block deployment
     # (e.g. OWLWATCH_HOST_PORT=7676 in the environment or an .env file).
     # OWLWATCH_PORT moves the port INSIDE the container too (rarely needed —
