@@ -139,6 +139,21 @@ h2 {
   color: var(--ink);
 }
 
+.icon-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Test-email failure chip: colored border plus the ✕ prefix in the markup —
+   never color alone (§5.8). Long SMTP errors truncate; full text in title. */
+.test-email-error {
+  color: var(--status-critical);
+  border-color: currentColor;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ---------- cards ---------- */
 
 .card {

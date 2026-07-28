@@ -140,6 +140,17 @@ func (n *Notifier) Evaluate(snap metrics.Snapshot) {
 	log.Printf("alerts: emailed %d recipient(s): %s", len(n.cfg.To), subject)
 }
 
+// SendTest sends a hard-coded test message so an operator can verify the
+// SMTP path without waiting for a real breach (POST /api/alerts/test). Safe
+// to call concurrently with Run: it touches only immutable config and the
+// stateless mailer, never the rule states.
+func (n *Notifier) SendTest() error {
+	subject := fmt.Sprintf("[owlwatch] %s: test email", n.hostname)
+	body := fmt.Sprintf("This is a test email from owlwatch on %s.\r\n\r\n"+
+		"Delivery works — threshold alert emails will reach this mailbox.\r\n", n.hostname)
+	return n.mailer.Send(subject, body)
+}
+
 // check advances one rule's state machine. A rule fires when it has been at
 // or above its threshold for cfg.For and its cooldown has passed; any sample
 // below the threshold resets the breach window.

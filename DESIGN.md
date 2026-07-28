@@ -309,6 +309,14 @@ Semantics (tests assert these):
   opportunistic STARTTLS — no new dependencies.
 - Local metrics only: on a hub, each peer sends its own alerts (every peer
   runs the same binary). Hub-side alerting for peers is future work.
+- `SendTest() error` sends a hard-coded test email (behind
+  `POST /api/alerts/test`, §4). It is safe to call concurrently with `Run`:
+  it touches only immutable config and the stateless mailer, never the rule
+  states. In the UI, the header shows an envelope button (top right, before
+  the token/theme buttons) only when `GET /api/alerts` reports
+  `enabled: true` — deployments without SMTP config render pixel-identical
+  to v1. Feedback is a transient chip: `✓ Test email sent` (role=status) or
+  `✕ <server error>` (role=alert, icon + text, never color alone).
 
 ### 3.5 Frontend — see §5 for the full UI spec
 
@@ -324,6 +332,13 @@ Everything the UI consumes, in one place: `GET /api/servers`
 `/api/host`, `/api/live`, `/api/history` remain as aliases for the local
 server — that alias surface is what hubs consume on peers, so it is frozen.
 Types exactly as in `web/src/lib/types.ts`.
+
+Email alerting (§3.4) adds `GET /api/alerts` (`{"enabled":bool}` — whether
+this instance has SMTP alerting configured) and `POST /api/alerts/test`
+(sends the hard-coded test email synchronously; `200 {"ok":true}`, `409` when
+alerting is not configured, `502` with `{"error":...}` when the send fails).
+The POST is the API's only mutating route; it sits behind the standard
+`/api/` token gate and host check like everything else.
 
 ## 5. Frontend spec
 

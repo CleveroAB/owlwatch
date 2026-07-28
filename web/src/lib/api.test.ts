@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { connectOverview, fetchServers, onUnauthorized, setToken, UnauthorizedError } from './api';
+import {
+  connectOverview,
+  fetchAlertsInfo,
+  fetchServers,
+  onUnauthorized,
+  sendTestAlertEmail,
+  setToken,
+  UnauthorizedError,
+} from './api';
 
 /** Minimal localStorage so get/setToken work outside a browser. */
 function stubStorage(): void {
@@ -138,5 +146,50 @@ describe('authenticated fetch streaming', () => {
     });
     await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
     stop();
+  });
+});
+
+describe('email alerts API', () => {
+  beforeEach(() => stubStorage());
+  afterEach(() => {
+    onUnauthorized(null);
+    vi.unstubAllGlobals();
+  });
+
+  it('sends the test request as an authenticated POST', async () => {
+    setToken('secret-token-1234');
+    const fetchMock = vi.fn(async () => respond(200, '{"ok":true}'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendTestAlertEmail();
+    const [path, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(path).toBe('/api/alerts/test');
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      'Bearer secret-token-1234',
+    );
+  });
+
+  it('surfaces the server error message on a failed send', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => respond(502, '{"error":"sending the test email failed: auth failed"}')),
+    );
+    await expect(sendTestAlertEmail()).rejects.toThrow('auth failed');
+  });
+
+  it('reports 401 through the unauthorized notifier', async () => {
+    setToken('stale');
+    vi.stubGlobal('fetch', vi.fn(async () => respond(401, '{"error":"unauthorized"}')));
+    const listener = vi.fn();
+    onUnauthorized(listener);
+
+    await expect(sendTestAlertEmail()).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('parses the enabled flag', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => respond(200, '{"enabled":true}')));
+    await expect(fetchAlertsInfo()).resolves.toEqual({ enabled: true });
   });
 });

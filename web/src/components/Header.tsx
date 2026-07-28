@@ -1,5 +1,11 @@
-import { useEffect, useReducer } from 'react';
-import { clearToken, getToken, type ConnectionState } from '../lib/api';
+import { useEffect, useReducer, useRef, useState } from 'react';
+import {
+  clearToken,
+  fetchAlertsInfo,
+  getToken,
+  sendTestAlertEmail,
+  type ConnectionState,
+} from '../lib/api';
 import { formatUptime } from '../lib/format';
 import type { HostInfo, ServerSummary } from '../lib/types';
 import type { Theme } from '../hooks/useTheme';
@@ -69,6 +75,7 @@ export function Header({
       )}
       <div className="spacer" />
       <ConnStatus status={status} />
+      <TestEmailButton />
       {getToken() && (
         <button
           type="button"
@@ -104,6 +111,82 @@ function Uptime({ bootTime }: { bootTime: number }) {
     return () => window.clearInterval(timer);
   }, []);
   return <>{formatUptime(Date.now() / 1000 - bootTime)}</>;
+}
+
+type TestEmailState =
+  | { phase: 'idle' }
+  | { phase: 'sending' }
+  | { phase: 'sent' }
+  | { phase: 'error'; message: string };
+
+/** How long the sent/error feedback chip stays up before reverting. */
+const TEST_EMAIL_FEEDBACK_MS = 6000;
+
+/**
+ * "Send test email" button (DESIGN.md §3.4). Rendered only when the instance
+ * serving the UI has email alerting configured — /api/alerts says so — which
+ * keeps the header pixel-identical to v1 on every other deployment.
+ */
+function TestEmailButton() {
+  const [enabled, setEnabled] = useState(false);
+  const [state, setState] = useState<TestEmailState>({ phase: 'idle' });
+  const resetTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetchAlertsInfo(ctrl.signal)
+      .then((info) => setEnabled(info.enabled))
+      .catch(() => {
+        /* status unknown (offline, 401, old server) — keep the button hidden */
+      });
+    return () => {
+      ctrl.abort();
+      if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
+    };
+  }, []);
+
+  if (!enabled) return null;
+
+  const send = () => {
+    if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
+    setState({ phase: 'sending' });
+    sendTestAlertEmail()
+      .then(() => setState({ phase: 'sent' }))
+      .catch((err: unknown) =>
+        setState({ phase: 'error', message: err instanceof Error ? err.message : String(err) }),
+      )
+      .finally(() => {
+        resetTimer.current = window.setTimeout(
+          () => setState({ phase: 'idle' }),
+          TEST_EMAIL_FEEDBACK_MS,
+        );
+      });
+  };
+
+  return (
+    <>
+      {state.phase === 'sent' && (
+        <span className="chip" role="status">
+          ✓ Test email sent
+        </span>
+      )}
+      {state.phase === 'error' && (
+        <span className="chip test-email-error" role="alert" title={state.message}>
+          ✕ {state.message}
+        </span>
+      )}
+      <button
+        type="button"
+        className="icon-btn"
+        disabled={state.phase === 'sending'}
+        onClick={send}
+        aria-label="Send a test alert email"
+        title="Send a test alert email"
+      >
+        {state.phase === 'sending' ? <EnvelopeDotsIcon /> : <EnvelopeIcon />}
+      </button>
+    </>
+  );
 }
 
 const CONN_META: Record<ConnectionState, { color: string; label: string }> = {
@@ -144,6 +227,45 @@ function MoonIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M13.3 10.1A5.9 5.9 0 0 1 5.9 2.7a5.9 5.9 0 1 0 7.4 7.4z" />
+    </svg>
+  );
+}
+
+function EnvelopeIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="1.8" y="3.2" width="12.4" height="9.6" rx="1.3" />
+      <path d="M2.2 4.2 8 8.8l5.8-4.6" />
+    </svg>
+  );
+}
+
+/** Envelope with ellipsis, shown while the test send is in flight. */
+function EnvelopeDotsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect
+        x="1.8"
+        y="3.2"
+        width="12.4"
+        height="9.6"
+        rx="1.3"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <circle cx="5.2" cy="8" r="0.9" fill="currentColor" />
+      <circle cx="8" cy="8" r="0.9" fill="currentColor" />
+      <circle cx="10.8" cy="8" r="0.9" fill="currentColor" />
     </svg>
   );
 }

@@ -107,8 +107,9 @@ func run(cfg appConfig) error {
 	host := col.HostInfo()
 	host.Version = version // HostInfo fills everything except Version (see collector docs)
 
+	var notifier *alerts.Notifier
 	if cfg.alerts.Enabled() {
-		notifier := alerts.New(cfg.alerts, host.Hostname)
+		notifier = alerts.New(cfg.alerts, host.Hostname)
 		snaps, unsubscribe := col.Subscribe()
 		wg.Add(1)
 		go func() {
@@ -141,6 +142,7 @@ func run(cfg appConfig) error {
 		SampleInterval: cfg.sampleInterval,
 		AllowedHosts:   cfg.allowedHosts,
 		Peers:          peersClient,
+		Alerts:         notifier,
 		Token:          cfg.token,
 		MaxSSEClients:  cfg.maxSSEClients,
 		MaxHistory:     cfg.maxHistory,

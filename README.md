@@ -253,6 +253,12 @@ email covers everything that fired at the same time. The email itself is a
 fixed plain-text summary: which metrics, their current values and thresholds,
 and since when.
 
+To check your SMTP settings end to end, use the envelope button in the top
+right of the dashboard header — it sends a test email to the configured
+recipients and shows whether delivery succeeded. The button only appears
+when alerting is configured (`POST /api/alerts/test` does the same thing
+from the command line).
+
 Each instance alerts on its own metrics. In a [federated](#monitoring-multiple-servers-federation)
 setup, give every peer its own SMTP settings — the hub does not alert on
 behalf of peers.
@@ -312,6 +318,8 @@ with an `Authorization: Bearer` header — `/healthz` never does.
 | `GET /api/servers/{id}/history?range=1h\|6h\|24h\|7d\|30d` | `{range, points}` — server-side bucketed aggregates (≤ ~400 points per response); proxied from the peer for peer ids. Unknown range → `400`, unknown id → `404`, unreachable peer → `502` |
 | `GET /api/overview/live` | SSE stream for the whole fleet — a `servers` event on connect (full `ServerSummary[]`), then `snapshot` events (`{id, snapshot}`) for every server and `status` events (`{id, online, lastSeen}`) on peer transitions |
 | `GET /healthz` | `200 ok` while the latest sample is fresh (within 5× the sample interval), `503` before the first sample or when sampling has stalled; drives the Docker `HEALTHCHECK` |
+| `GET /api/alerts` | `{"enabled": bool}` — whether this instance has [email alerts](#email-alerts) configured |
+| `POST /api/alerts/test` | sends the test alert email to the configured recipients: `200 {"ok":true}`, `409` when alerting is not configured, `502` with the SMTP error when the send fails |
 
 The unprefixed v1 endpoints — `GET /api/host`, `GET /api/live`,
 `GET /api/history` — remain as aliases for the local server. That alias

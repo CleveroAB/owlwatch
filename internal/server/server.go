@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/CleveroAB/owlwatch/internal/alerts"
 	"github.com/CleveroAB/owlwatch/internal/collector"
 	"github.com/CleveroAB/owlwatch/internal/metrics"
 	"github.com/CleveroAB/owlwatch/internal/peers"
@@ -28,6 +29,7 @@ type Config struct {
 	SampleInterval time.Duration    // collector cadence: hello intervalMs and the healthz staleness bound
 	AllowedHosts   []string         // OWLWATCH_ALLOWED_HOSTS: extra Host header names accepted by withHostCheck
 	Peers          *peers.Client    // OWLWATCH_PEERS hub state (DESIGN.md §9); nil = standalone
+	Alerts         *alerts.Notifier // email alerting (DESIGN.md §3.4); nil = disabled
 	Token          string           // OWLWATCH_TOKEN: required on /api/ routes when non-empty
 	MaxSSEClients  int              // global concurrent SSE cap
 	MaxHistory     int              // global concurrent history-query cap
@@ -36,7 +38,8 @@ type Config struct {
 // Server serves the JSON API, the SSE live streams and the embedded UI.
 type Server struct {
 	cfg     Config
-	peers   peerSource // cfg.Peers behind the internal test seam; nil when standalone
+	peers   peerSource  // cfg.Peers behind the internal test seam; nil when standalone
+	alerts  alertSender // cfg.Alerts behind the internal test seam; nil when disabled
 	handler http.Handler
 }
 
@@ -58,6 +61,10 @@ func New(cfg Config) *Server {
 		// non-nil interface would defeat the s.peers == nil standalone checks.
 		s.peers = cfg.Peers
 	}
+	if cfg.Alerts != nil {
+		// Same nil-in-interface guard as peers above.
+		s.alerts = cfg.Alerts
+	}
 
 	mux := http.NewServeMux()
 	// Fleet API (DESIGN.md §9.4), registered even when standalone — the UI
@@ -67,6 +74,10 @@ func New(cfg Config) *Server {
 	mux.HandleFunc("GET /api/servers/{id}/history", s.handleServerHistory)
 	mux.HandleFunc("GET /api/servers/{id}/live", s.handleServerLive)
 	mux.HandleFunc("GET /api/overview/live", s.handleOverviewLive)
+	// Email alerting (DESIGN.md §3.4). POST /api/alerts/test is the API's
+	// only mutating route; it sits behind the same token gate as the rest.
+	mux.HandleFunc("GET /api/alerts", s.handleAlerts)
+	mux.HandleFunc("POST /api/alerts/test", s.handleAlertsTest)
 	// Legacy aliases for the local server. This surface is frozen: it is
 	// what a hub consumes on its peers (DESIGN.md §4).
 	mux.HandleFunc("GET /api/host", s.handleHost)

@@ -362,6 +362,35 @@ export async function fetchServers(signal?: AbortSignal): Promise<ServerSummary[
   return apiGet<ServerSummary[]>('/api/servers', signal);
 }
 
+/* ---------- email alerts (DESIGN.md §3.4) ---------- */
+
+/** Whether the instance serving the UI has email alerting configured. */
+export interface AlertsInfo {
+  enabled: boolean;
+}
+
+export async function fetchAlertsInfo(signal?: AbortSignal): Promise<AlertsInfo> {
+  return apiGet<AlertsInfo>('/api/alerts', signal);
+}
+
+/**
+ * Ask the server to send its hard-coded test email to the configured
+ * recipients. Resolves on delivery; rejects with the server's error message
+ * (e.g. SMTP auth failure) so the header can show it.
+ */
+export async function sendTestAlertEmail(): Promise<void> {
+  const token = getToken();
+  const res = await fetch('/api/alerts/test', { method: 'POST', headers: authHeaders() });
+  if (res.status === 401) {
+    reportUnauthorized(token);
+    throw new UnauthorizedError('/api/alerts/test');
+  }
+  if (!res.ok) {
+    const body = safeParse<{ error?: string }>(await res.text().catch(() => ''));
+    throw new Error(body?.error ?? `POST /api/alerts/test: HTTP ${res.status}`);
+  }
+}
+
 export async function fetchHistory(
   basePath: string,
   range: RangeKey,
