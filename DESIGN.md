@@ -550,6 +550,7 @@ Multi-stage `Dockerfile`:
 services:
   owlwatch:
     image: ghcr.io/cleveroab/owlwatch:1.0.0
+    build: { context: ., args: { VERSION: 1.0.0 } } # up -d --build = from source
     container_name: owlwatch
     ports: ["127.0.0.1:8080:8080"]
     restart: unless-stopped

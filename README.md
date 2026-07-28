@@ -38,10 +38,15 @@ privately according to [SECURITY.md](SECURITY.md).
 ```sh
 git clone https://github.com/CleveroAB/owlwatch.git
 cd owlwatch
-docker compose up -d
+docker compose up -d --build
 ```
 
 Open <http://localhost:8080>. That's it.
+
+`--build` compiles the image from the checkout (frontend and Go binary), so
+what runs always matches the source you cloned or pulled. Leave it off to
+reuse the image from the previous build, or use the
+[prebuilt image](#prebuilt-image) below to skip building entirely.
 
 If host port 8080 is taken, override the published port without editing the
 file: `OWLWATCH_HOST_PORT=7676 docker compose up -d` (or set

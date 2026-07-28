@@ -7,6 +7,15 @@
 services:
   owlwatch:
     image: ghcr.io/cleveroab/owlwatch:${OWLWATCH_VERSION:-1.0.0}
+    # Build from this checkout: `docker compose up -d --build` compiles
+    # frontend + binary from source and tags the result as the image above
+    # (shadowing any pulled tag until `docker compose pull`). Without --build,
+    # compose reuses whatever image of that tag is already present. Release
+    # images are still published to ghcr.io — set OWLWATCH_VERSION to pick one.
+    build:
+      context: .
+      args:
+        VERSION: ${OWLWATCH_VERSION:-1.0.0}
     container_name: owlwatch
     # The image runs as the distroless "nonroot" user (uid 65532) and creates
     # /data owned by it. Docker copies that ownership onto a FRESH named
