@@ -216,7 +216,46 @@ Everything is environment variables; the defaults are sensible.
 | `OWLWATCH_TOKEN` | *(empty)* | every `/api/*` route requires `Authorization: Bearer` when set (`/healthz` stays open); minimum 16 characters. Also used as the fallback outgoing peer token when an entry omits its own token |
 | `OWLWATCH_MAX_SSE_CLIENTS` | `128` | maximum concurrent live-stream clients |
 | `OWLWATCH_MAX_HISTORY_REQUESTS` | `16` | maximum concurrent history requests |
+| `OWLWATCH_SMTP_HOST` | *(empty)* | SMTP server for [email alerts](#email-alerts); alerting is enabled when this, `OWLWATCH_SMTP_FROM` and `OWLWATCH_ALERT_TO` are all set |
+| `OWLWATCH_SMTP_PORT` | `587` | SMTP port |
+| `OWLWATCH_SMTP_USER` / `OWLWATCH_SMTP_PASS` | *(empty)* | optional SMTP login (PLAIN, only over STARTTLS) |
+| `OWLWATCH_SMTP_FROM` | *(empty)* | sender address for alert emails |
+| `OWLWATCH_ALERT_TO` | *(empty)* | comma-separated recipient addresses |
+| `OWLWATCH_ALERT_CPU_PCT` | `90` | alert when total CPU usage stays at/above this percentage (`0` disables the rule) |
+| `OWLWATCH_ALERT_MEM_PCT` | `90` | alert threshold for memory usage (`0` disables) |
+| `OWLWATCH_ALERT_DISK_PCT` | `92` | alert threshold for disk usage, checked per mount (`0` disables) |
+| `OWLWATCH_ALERT_GPU_TEMP_C` | `90` | alert threshold for GPU temperature in °C, checked per GPU (`0` disables) |
+| `OWLWATCH_ALERT_FOR` | `5m` | how long a metric must stay at/above its threshold before the email goes out |
+| `OWLWATCH_ALERT_COOLDOWN` | `30m` | minimum time between two emails for the same metric while it stays breached |
 | `HOST_PROC`, `HOST_SYS`, `HOST_ETC`, `HOST_VAR`, `HOST_RUN` | *(unset)* | standard [gopsutil](https://github.com/shirou/gopsutil) redirects; docker-compose sets the first three |
+
+### Email alerts
+
+owlwatch can email you when a metric misbehaves — no extra service, just a
+plain SMTP connection from the binary itself. Alerting is off until you
+configure a server, a sender and at least one recipient:
+
+```bash
+OWLWATCH_SMTP_HOST=smtp.example.com     # STARTTLS is used when offered
+OWLWATCH_SMTP_FROM=owlwatch@example.com
+OWLWATCH_ALERT_TO=ops@example.com,oncall@example.com
+# optional login:
+OWLWATCH_SMTP_USER=owlwatch@example.com
+OWLWATCH_SMTP_PASS=app-password
+```
+
+The thresholds above are suggestions — tune them to taste, or set one to `0`
+to turn that rule off. An email is sent only after a metric has been at or
+above its threshold for `OWLWATCH_ALERT_FOR` (a dip below resets the clock),
+and while it stays breached you get at most one email per
+`OWLWATCH_ALERT_COOLDOWN`, so a busy weekend doesn't fill your inbox. One
+email covers everything that fired at the same time. The email itself is a
+fixed plain-text summary: which metrics, their current values and thresholds,
+and since when.
+
+Each instance alerts on its own metrics. In a [federated](#monitoring-multiple-servers-federation)
+setup, give every peer its own SMTP settings — the hub does not alert on
+behalf of peers.
 
 ### URL parameters
 

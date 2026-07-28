@@ -48,6 +48,22 @@ services:
       # OWLWATCH_PEERS=web1=https://web1.example.com|WEB1_TOKEN
       # in its .env. Prefer a distinct strong token for each peer.
       OWLWATCH_PEERS: ${OWLWATCH_PEERS:-}
+      # Email alerts (README, "Email alerts"): set host, from and recipients
+      # in your .env to enable; thresholds/durations have sensible defaults
+      # (CPU 90%, mem 90%, disk 92%, GPU 90°C, sustained 5m, cooldown 30m)
+      # and can be overridden with the OWLWATCH_ALERT_* variables.
+      OWLWATCH_SMTP_HOST: ${OWLWATCH_SMTP_HOST:-}
+      OWLWATCH_SMTP_PORT: ${OWLWATCH_SMTP_PORT:-587}
+      OWLWATCH_SMTP_USER: ${OWLWATCH_SMTP_USER:-}
+      OWLWATCH_SMTP_PASS: ${OWLWATCH_SMTP_PASS:-}
+      OWLWATCH_SMTP_FROM: ${OWLWATCH_SMTP_FROM:-}
+      OWLWATCH_ALERT_TO: ${OWLWATCH_ALERT_TO:-}
+      OWLWATCH_ALERT_CPU_PCT: ${OWLWATCH_ALERT_CPU_PCT:-}
+      OWLWATCH_ALERT_MEM_PCT: ${OWLWATCH_ALERT_MEM_PCT:-}
+      OWLWATCH_ALERT_DISK_PCT: ${OWLWATCH_ALERT_DISK_PCT:-}
+      OWLWATCH_ALERT_GPU_TEMP_C: ${OWLWATCH_ALERT_GPU_TEMP_C:-}
+      OWLWATCH_ALERT_FOR: ${OWLWATCH_ALERT_FOR:-}
+      OWLWATCH_ALERT_COOLDOWN: ${OWLWATCH_ALERT_COOLDOWN:-}
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro

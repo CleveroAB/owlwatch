@@ -61,6 +61,17 @@ Repository layout:
 | `OWLWATCH_TOKEN` | *(empty)* | require an `Authorization: Bearer` header on all `/api/*` routes; minimum 16 characters; also the fallback outgoing peer token (§9) |
 | `OWLWATCH_MAX_SSE_CLIENTS` | `128` | process-wide concurrent live-stream limit (1–10000) |
 | `OWLWATCH_MAX_HISTORY_REQUESTS` | `16` | process-wide concurrent history-request limit (1–1000) |
+| `OWLWATCH_SMTP_HOST` | *(empty)* | SMTP server for email alerts; setting it (together with `OWLWATCH_SMTP_FROM` and `OWLWATCH_ALERT_TO`) enables alerting. STARTTLS is used when the server offers it |
+| `OWLWATCH_SMTP_PORT` | `587` | SMTP port (1–65535) |
+| `OWLWATCH_SMTP_USER`, `OWLWATCH_SMTP_PASS` | *(empty)* | optional SMTP PLAIN credentials; refused over an unencrypted connection to a non-localhost server |
+| `OWLWATCH_SMTP_FROM` | *(empty)* | alert sender address; required when alerting is enabled |
+| `OWLWATCH_ALERT_TO` | *(empty)* | comma-separated alert recipients; required when alerting is enabled |
+| `OWLWATCH_ALERT_CPU_PCT` | `90` | email when total CPU usage stays at/above this % (0–100, 0 disables the rule) |
+| `OWLWATCH_ALERT_MEM_PCT` | `90` | email when memory usage stays at/above this % (0–100, 0 disables) |
+| `OWLWATCH_ALERT_DISK_PCT` | `92` | per-mount disk usage threshold % — matches the UI's critical meter color (0–100, 0 disables) |
+| `OWLWATCH_ALERT_GPU_TEMP_C` | `90` | per-GPU temperature threshold in °C (0–150, 0 disables) |
+| `OWLWATCH_ALERT_FOR` | `5m` | how long a metric must stay at/above its threshold before the email is sent (Go duration) |
+| `OWLWATCH_ALERT_COOLDOWN` | `30m` | minimum gap between two emails for the same rule while it stays breached (Go duration) |
 | `HOST_PROC`, `HOST_SYS`, `HOST_ETC`, `HOST_VAR`, `HOST_RUN` | *(unset)* | standard gopsutil redirects; set by docker-compose to `/host/proc` etc. |
 
 Config parsing lives in `cmd/owlwatch/main.go` (plain `os.Getenv` + defaults,
@@ -256,9 +267,52 @@ Routes (stdlib `http.ServeMux`, Go 1.22 patterns; no router dependency):
 6. Version: `var version = "dev"` package var (set via `-ldflags "-X main.version=…"`).
 7. Startup log: one friendly line with port, DB path, GPU yes/no.
 
-### 3.4 Frontend — see §5 for the full UI spec
+### 3.4 `internal/alerts`
 
-### 3.5 Docker & docs — see §6
+```go
+type Config struct {
+    SMTPHost string        // "" (with empty To) disables alerting
+    SMTPPort int           // default 587
+    SMTPUser string        // optional PLAIN auth
+    SMTPPass string
+    From     string
+    To       []string
+
+    CPUPct   float64       // thresholds; 0 disables the individual rule
+    MemPct   float64
+    DiskPct  float64       // applied per mount
+    GPUTempC float64       // applied per GPU
+
+    For      time.Duration // metric must stay at/above threshold this long
+    Cooldown time.Duration // minimum gap between emails for the same rule
+}
+func (c Config) Enabled() bool
+
+type Mailer interface { Send(subject, body string) error } // test seam
+
+func New(cfg Config, hostname string) *Notifier
+func (n *Notifier) Run(ctx context.Context, snaps <-chan metrics.Snapshot)
+```
+
+Semantics (tests assert these):
+
+- The evaluator is driven by snapshot timestamps, not wall-clock ticks, so a
+  lossy subscriber channel (the collector never blocks on a slow subscriber)
+  cannot stretch or shrink a breach window.
+- A rule fires once its metric has been at/above the threshold for `For`
+  continuously; one sample below resets the window.
+- One email covers every rule that becomes due on the same sample. Per rule,
+  no further email is sent until `Cooldown` passes; a failed SMTP send retries
+  after 1 minute instead.
+- The email layout is hard-coded plain text (subject `[owlwatch] host: ...`,
+  one line per breached metric); delivery is stdlib `net/smtp` with
+  opportunistic STARTTLS — no new dependencies.
+- Local metrics only: on a hub, each peer sends its own alerts (every peer
+  runs the same binary). Hub-side alerting for peers is future work.
+
+### 3.5 Frontend — see §5 for the full UI spec
+
+### 3.6 Docker & docs — see §6
 
 ## 4. HTTP/SSE contract summary
 
@@ -527,10 +581,14 @@ sells and operates it.
 
 ## 8. Non-goals (do not build)
 
-Network I/O metrics, per-process lists, alerts/notifications, AMD/Intel/Apple
-GPU support (NVIDIA only), historical per-core CPU, config files. The GPU
-history aggregates across cards (per-GPU history is future work). Multi-host
-monitoring and token auth are included in the public v1 contract — see §9.
+Network I/O metrics, per-process lists, AMD/Intel/Apple GPU support (NVIDIA
+only), historical per-core CPU, config files. The GPU history aggregates
+across cards (per-GPU history is future work). Multi-host monitoring and token
+auth are included in the public v1 contract — see §9. Email alerts exist
+(§3.4) but stay deliberately minimal: fixed email layout, local metrics only,
+SMTP as the single delivery channel — Slack/webhook delivery, per-rule
+recipients and hub-side alerting for peers are future work, and an alerting
+UI is out of scope (configuration is env vars like everything else).
 
 ## 9. Federation: hub mode, multiple servers, token auth
 
