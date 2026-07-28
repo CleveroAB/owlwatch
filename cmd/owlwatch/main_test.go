@@ -12,6 +12,11 @@ var configEnvKeys = []string{
 	"OWLWATCH_RETENTION_DAYS", "OWLWATCH_ROOTFS", "OWLWATCH_ALLOWED_HOSTS",
 	"OWLWATCH_PEERS", "OWLWATCH_TOKEN", "OWLWATCH_MAX_SSE_CLIENTS",
 	"OWLWATCH_MAX_HISTORY_REQUESTS",
+	"OWLWATCH_SMTP_HOST", "OWLWATCH_SMTP_PORT", "OWLWATCH_SMTP_USER",
+	"OWLWATCH_SMTP_PASS", "OWLWATCH_SMTP_FROM", "OWLWATCH_ALERT_TO",
+	"OWLWATCH_ALERT_CPU_PCT", "OWLWATCH_ALERT_MEM_PCT",
+	"OWLWATCH_ALERT_DISK_PCT", "OWLWATCH_ALERT_GPU_TEMP_C",
+	"OWLWATCH_ALERT_FOR", "OWLWATCH_ALERT_COOLDOWN",
 }
 
 func cleanConfigEnv(t *testing.T) {
@@ -54,6 +59,54 @@ func TestLoadConfigAcceptsBoundedOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadConfigAlertDefaults(t *testing.T) {
+	cleanConfigEnv(t)
+	t.Setenv("OWLWATCH_SMTP_HOST", "smtp.example.com")
+	t.Setenv("OWLWATCH_SMTP_FROM", "owlwatch@example.com")
+	t.Setenv("OWLWATCH_ALERT_TO", "ops@example.com, oncall@example.com")
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	a := cfg.alerts
+	if !a.Enabled() {
+		t.Fatalf("alerts not enabled with host, from and recipients set")
+	}
+	if len(a.To) != 2 || a.To[1] != "oncall@example.com" {
+		t.Fatalf("recipients = %v, want two trimmed addresses", a.To)
+	}
+	if a.SMTPPort != 587 {
+		t.Fatalf("SMTP port default = %d, want 587", a.SMTPPort)
+	}
+	if a.CPUPct != 90 || a.MemPct != 90 || a.DiskPct != 92 || a.GPUTempC != 90 {
+		t.Fatalf("threshold defaults = %+v, want 90/90/92/90", a)
+	}
+	if a.For != 5*time.Minute || a.Cooldown != 30*time.Minute {
+		t.Fatalf("for/cooldown defaults = %s/%s, want 5m/30m", a.For, a.Cooldown)
+	}
+}
+
+func TestLoadConfigAlertRequiresSender(t *testing.T) {
+	cleanConfigEnv(t)
+	t.Setenv("OWLWATCH_SMTP_HOST", "smtp.example.com")
+	t.Setenv("OWLWATCH_ALERT_TO", "ops@example.com")
+	_, err := loadConfig()
+	if err == nil || !strings.Contains(err.Error(), "OWLWATCH_SMTP_FROM: required") {
+		t.Fatalf("loadConfig error = %v, want missing-sender error", err)
+	}
+}
+
+func TestLoadConfigAlertsDisabledByDefault(t *testing.T) {
+	cleanConfigEnv(t)
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.alerts.Enabled() {
+		t.Fatalf("alerts enabled without any OWLWATCH_SMTP_*/OWLWATCH_ALERT_* config")
+	}
+}
+
 func TestLoadConfigRejectsUnsafeOrPathologicalValues(t *testing.T) {
 	tests := []struct {
 		name string
@@ -68,6 +121,11 @@ func TestLoadConfigRejectsUnsafeOrPathologicalValues(t *testing.T) {
 		{"short token", "OWLWATCH_TOKEN", "short", "at least 16 characters"},
 		{"zero SSE limit", "OWLWATCH_MAX_SSE_CLIENTS", "0", "want 1..10000"},
 		{"history limit too large", "OWLWATCH_MAX_HISTORY_REQUESTS", "1001", "want 1..1000"},
+		{"recipients without SMTP host", "OWLWATCH_ALERT_TO", "ops@example.com", "OWLWATCH_SMTP_HOST: required"},
+		{"SMTP host without recipients", "OWLWATCH_SMTP_HOST", "smtp.example.com", "OWLWATCH_ALERT_TO: required"},
+		{"CPU threshold over 100", "OWLWATCH_ALERT_CPU_PCT", "150", "want 0..100"},
+		{"non-numeric memory threshold", "OWLWATCH_ALERT_MEM_PCT", "lots", "want 0..100"},
+		{"negative alert duration", "OWLWATCH_ALERT_FOR", "-5m", "want a positive Go duration"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

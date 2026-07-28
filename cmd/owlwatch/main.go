@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/CleveroAB/owlwatch/internal/alerts"
 	"github.com/CleveroAB/owlwatch/internal/collector"
 	"github.com/CleveroAB/owlwatch/internal/metrics"
 	"github.com/CleveroAB/owlwatch/internal/peers"
@@ -41,6 +42,7 @@ type appConfig struct {
 	token           string       // OWLWATCH_TOKEN: API auth + default outgoing peer token
 	maxSSEClients   int
 	maxHistory      int
+	alerts          alerts.Config // OWLWATCH_SMTP_* / OWLWATCH_ALERT_*: email notifications
 }
 
 func main() {
@@ -105,6 +107,17 @@ func run(cfg appConfig) error {
 	host := col.HostInfo()
 	host.Version = version // HostInfo fills everything except Version (see collector docs)
 
+	if cfg.alerts.Enabled() {
+		notifier := alerts.New(cfg.alerts, host.Hostname)
+		snaps, unsubscribe := col.Subscribe()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer unsubscribe()
+			notifier.Run(ctx, snaps)
+		}()
+	}
+
 	gpu := "no"
 	if host.HasGPU {
 		gpu = "yes"
@@ -113,8 +126,12 @@ func run(cfg appConfig) error {
 	if cfg.token != "" {
 		auth = "on"
 	}
-	log.Printf("owlwatch %s listening on %s (db: %s, gpu: %s, peers: %d, auth: %s)",
-		version, net.JoinHostPort(cfg.listenAddress, strconv.Itoa(cfg.port)), cfg.dbPath, gpu, len(cfg.peers), auth)
+	alerting := "off"
+	if cfg.alerts.Enabled() {
+		alerting = "on"
+	}
+	log.Printf("owlwatch %s listening on %s (db: %s, gpu: %s, peers: %d, auth: %s, alerts: %s)",
+		version, net.JoinHostPort(cfg.listenAddress, strconv.Itoa(cfg.port)), cfg.dbPath, gpu, len(cfg.peers), auth, alerting)
 
 	srv := server.New(server.Config{
 		Addr:           net.JoinHostPort(cfg.listenAddress, strconv.Itoa(cfg.port)),
@@ -286,6 +303,67 @@ func loadConfig() (appConfig, error) {
 	if cfg.maxHistory, err = envInt("OWLWATCH_MAX_HISTORY_REQUESTS", cfg.maxHistory, 1, 1000); err != nil {
 		return cfg, err
 	}
+	if cfg.alerts, err = loadAlertConfig(); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
+// loadAlertConfig reads the OWLWATCH_SMTP_* / OWLWATCH_ALERT_* variables.
+// Alerting is enabled only when SMTP host, sender and recipients are all
+// present; a partial configuration is a fatal startup error, never a silent
+// skip (same stance as OWLWATCH_PEERS). The threshold defaults are
+// suggestions — override any of them, or set one to 0 to disable that rule.
+func loadAlertConfig() (alerts.Config, error) {
+	cfg := alerts.Config{
+		SMTPHost: os.Getenv("OWLWATCH_SMTP_HOST"),
+		SMTPUser: os.Getenv("OWLWATCH_SMTP_USER"),
+		SMTPPass: os.Getenv("OWLWATCH_SMTP_PASS"),
+		From:     os.Getenv("OWLWATCH_SMTP_FROM"),
+		CPUPct:   90,
+		MemPct:   90,
+		DiskPct:  92, // matches the UI's "critical" meter color (DESIGN.md §5.4)
+		GPUTempC: 90,
+		For:      5 * time.Minute,
+		Cooldown: 30 * time.Minute,
+	}
+	for _, rcpt := range strings.Split(os.Getenv("OWLWATCH_ALERT_TO"), ",") {
+		if rcpt = strings.TrimSpace(rcpt); rcpt != "" {
+			cfg.To = append(cfg.To, rcpt)
+		}
+	}
+	if cfg.SMTPHost != "" || len(cfg.To) > 0 {
+		switch {
+		case cfg.SMTPHost == "":
+			return cfg, fmt.Errorf("OWLWATCH_SMTP_HOST: required when OWLWATCH_ALERT_TO is set")
+		case len(cfg.To) == 0:
+			return cfg, fmt.Errorf("OWLWATCH_ALERT_TO: required when OWLWATCH_SMTP_HOST is set")
+		case cfg.From == "":
+			return cfg, fmt.Errorf("OWLWATCH_SMTP_FROM: required when OWLWATCH_SMTP_HOST is set")
+		}
+	}
+	var err error
+	if cfg.SMTPPort, err = envInt("OWLWATCH_SMTP_PORT", 587, 1, 65535); err != nil {
+		return cfg, err
+	}
+	if cfg.CPUPct, err = envFloat("OWLWATCH_ALERT_CPU_PCT", cfg.CPUPct, 0, 100); err != nil {
+		return cfg, err
+	}
+	if cfg.MemPct, err = envFloat("OWLWATCH_ALERT_MEM_PCT", cfg.MemPct, 0, 100); err != nil {
+		return cfg, err
+	}
+	if cfg.DiskPct, err = envFloat("OWLWATCH_ALERT_DISK_PCT", cfg.DiskPct, 0, 100); err != nil {
+		return cfg, err
+	}
+	if cfg.GPUTempC, err = envFloat("OWLWATCH_ALERT_GPU_TEMP_C", cfg.GPUTempC, 0, 150); err != nil {
+		return cfg, err
+	}
+	if cfg.For, err = envDuration("OWLWATCH_ALERT_FOR", cfg.For); err != nil {
+		return cfg, err
+	}
+	if cfg.Cooldown, err = envDuration("OWLWATCH_ALERT_COOLDOWN", cfg.Cooldown); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
 }
 
@@ -299,6 +377,18 @@ func envInt(key string, def, min, max int) (int, error) {
 		return def, fmt.Errorf("%s: want %d..%d, got %q", key, min, max, v)
 	}
 	return n, nil
+}
+
+func envFloat(key string, def, min, max float64) (float64, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return def, nil
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f < min || f > max {
+		return def, fmt.Errorf("%s: want %g..%g, got %q", key, min, max, v)
+	}
+	return f, nil
 }
 
 func envDuration(key string, def time.Duration) (time.Duration, error) {
