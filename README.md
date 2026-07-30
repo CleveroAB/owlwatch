@@ -109,10 +109,13 @@ with the default private propagation, filesystems mounted on the host *after*
 the container starts would not appear inside it, and their disk usage would
 silently be read from the empty mountpoint directory underneath.
 
-The service runs as the distroless `nonroot` user with a read-only root
-filesystem, no Linux capabilities, and `no-new-privileges`. Only the persistent
-`/data` volume and temporary `/tmp` filesystem are writable. Standard Linux
-host metrics remain readable through the supplied read-only bind mounts.
+The application runs as the distroless `nonroot` user with a read-only root
+filesystem and `no-new-privileges`. A tiny startup process uses only
+`CHOWN`, `SETGID`, and `SETUID` to repair persistent storage ownership (needed
+for Coolify-style bind mounts), then drops permanently to uid/gid 65532 before
+the application starts. Only the persistent `/data` volume and temporary
+`/tmp` filesystem are writable. Standard Linux host metrics remain readable
+through the supplied read-only bind mounts.
 
 Host monitoring is supported on **Linux hosts**. Docker Desktop on macOS or
 Windows would monitor Docker's Linux VM rather than the physical machine and

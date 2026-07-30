@@ -51,24 +51,24 @@ owlwatch: open store /data/owlwatch.db: store: /data is not writable
 (uid 65532/gid 65532, directory owned by 0:0 mode 0755): permission denied
 ```
 
-The container runs as the distroless `nonroot` user (uid 65532). The image
-ships `/data` owned by that user, and Docker copies the ownership onto a
-**fresh** named volume — but not onto one that already has content. A volume
-created by a pre-1.0 release, which ran as root, therefore stays owned by
-`0:0` and the nonroot process cannot create the database or its `-wal`/`-shm`
-sidecars.
+The application runs as the distroless `nonroot` user (uid 65532). Current
+images include a tiny init process that repairs `/data` ownership first, then
+permanently drops to that user before starting owlwatch. This supports both
+old root-owned volumes and platforms such as Coolify that create persistent
+bind mounts as `root:root`.
 
-Fix the ownership of the existing volume on the host, keeping your history:
+Pull/rebuild the current image and recreate the container. If you override the
+image user or entrypoint, remove that override so the init process can run.
+For older images, fix ownership on the host while keeping your history:
 
 ```sh
 docker volume inspect <volume> --format '{{.Mountpoint}}'
 sudo chown -R 65532:65532 "$(docker volume inspect <volume> --format '{{.Mountpoint}}')"
 ```
 
-Find the volume name with `docker volume ls | grep owlwatch`; platforms that
-namespace their resources (Coolify, for example) prefix it with a project id.
-Restart the container afterwards. Discarding the history instead — deleting
-the volume so a fresh, correctly-owned one is created — also works.
+Find the volume name with `docker volume ls | grep owlwatch`; platforms may
+prefix it with a project id. Restart the container afterwards. Discarding the
+history instead — deleting the volume so a fresh one is created — also works.
 
 ## The container is unhealthy immediately after startup
 
