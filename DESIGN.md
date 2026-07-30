@@ -536,13 +536,16 @@ Multi-stage `Dockerfile`:
 1. `node:22-alpine` — `COPY web/`, `npm ci`, `npm run build`.
 2. `golang:1.26.5-alpine` — copy module files + source, copy `web/dist` from
    stage 1 into `web/dist`, `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w
-   -X main.version=$VERSION" ./cmd/owlwatch`. `ARG VERSION=dev`.
+   -X main.version=$VERSION" ./cmd/owlwatch`, and build `./cmd/owlwatch-init`.
+   `ARG VERSION=dev`.
 3. Final: `gcr.io/distroless/base-debian12:nonroot` (glibc present for the injected
-   `nvidia-smi`; no shell). Copy binary. `ENV OWLWATCH_DB=/data/owlwatch.db`,
-   `EXPOSE 8080`, `VOLUME /data`,
-   `HEALTHCHECK --interval=30s --timeout=5s CMD ["/owlwatch","-healthcheck"]`
-   (exec form is mandatory — distroless has no shell for a string-form CMD),
-   `ENTRYPOINT ["/owlwatch"]`.
+   `nvidia-smi`; no shell). Copy both binaries. The init starts as root to
+   repair `/data` ownership on platform-created bind mounts, then permanently
+   drops to uid/gid 65532 and execs owlwatch. `ENV
+   OWLWATCH_DB=/data/owlwatch.db`, `EXPOSE 8080`, `VOLUME /data`,
+   `HEALTHCHECK --interval=30s --timeout=5s CMD
+   ["/owlwatch-init","-healthcheck"]` (exec form is mandatory — distroless has
+   no shell for a string-form CMD), `ENTRYPOINT ["/owlwatch-init"]`.
 
 `docker-compose.yml` (the canonical way to run):
 
@@ -556,6 +559,7 @@ services:
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID] # init only; cleared when it drops uid
     security_opt: [no-new-privileges:true]
     environment:
       HOST_PROC: /host/proc

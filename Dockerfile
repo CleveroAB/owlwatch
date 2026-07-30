@@ -27,6 +27,8 @@ ARG TARGETOS TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags "-s -w -X main.version=${VERSION}" \
       -o /owlwatch ./cmd/owlwatch
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
+      -ldflags "-s -w" -o /owlwatch-init ./cmd/owlwatch-init
 RUN mkdir /runtime-data
 
 # ---- Stage 3: runtime -------------------------------------------------------
@@ -35,13 +37,18 @@ RUN mkdir /runtime-data
 # dynamically linked against glibc. No shell, no package manager.
 FROM gcr.io/distroless/base-debian12:nonroot
 COPY --from=builder /owlwatch /owlwatch
+COPY --from=builder /owlwatch-init /owlwatch-init
 COPY --chown=nonroot:nonroot --from=builder /runtime-data /data
 ENV OWLWATCH_DB=/data/owlwatch.db \
     OWLWATCH_LISTEN=0.0.0.0
 EXPOSE 8080
 VOLUME /data
+# Coolify and similar platforms create bind-mounted storage as root:root,
+# hiding the ownership baked into /data. The tiny init starts as root, repairs
+# only /data, drops permanently to uid/gid 65532, then execs owlwatch.
+USER root
 # Exec form only — the image has no shell, so a string-form CMD would fail.
 # `owlwatch -healthcheck` GETs http://127.0.0.1:$OWLWATCH_PORT/healthz and
 # exits 0/1.
-HEALTHCHECK --interval=30s --timeout=5s CMD ["/owlwatch", "-healthcheck"]
-ENTRYPOINT ["/owlwatch"]
+HEALTHCHECK --interval=30s --timeout=5s CMD ["/owlwatch-init", "-healthcheck"]
+ENTRYPOINT ["/owlwatch-init"]
