@@ -144,12 +144,13 @@ func withTokenAuth(token string, next http.Handler) http.Handler {
 	})
 }
 
-// withRequestLimits bounds the two expensive request classes: long-lived SSE
-// subscriptions and SQLite/peer history queries. Limits are process-wide and
+// withRequestLimits bounds the expensive request classes: long-lived SSE
+// subscriptions, SQLite/peer history queries, and filesystem scans. Limits are process-wide and
 // fail fast so overload cannot accumulate unbounded goroutines or memory.
 func withRequestLimits(maxSSE, maxHistory int, next http.Handler) http.Handler {
 	sseSlots := make(chan struct{}, maxSSE)
 	historySlots := make(chan struct{}, maxHistory)
+	diskSlots := make(chan struct{}, 2)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var slots chan struct{}
 		switch {
@@ -157,6 +158,8 @@ func withRequestLimits(maxSSE, maxHistory int, next http.Handler) http.Handler {
 			slots = sseSlots
 		case strings.HasPrefix(r.URL.Path, "/api/") && strings.HasSuffix(r.URL.Path, "/history"):
 			slots = historySlots
+		case strings.HasPrefix(r.URL.Path, "/api/") && strings.HasSuffix(r.URL.Path, "/disk-usage"):
+			slots = diskSlots
 		default:
 			next.ServeHTTP(w, r)
 			return

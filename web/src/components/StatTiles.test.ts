@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DiskMetrics, MemMetrics, ProcessMemoryMetrics } from '../lib/types';
-import { largestDisks, topMemoryProcesses } from './StatTiles';
+import { containingMount, largestDisks, parentDiskPath, topMemoryProcesses } from './StatTiles';
 
 function process(pid: number, used: number): ProcessMemoryMetrics {
   return { pid, name: `process-${pid}`, used, usedPct: used / 100 };
@@ -37,5 +37,17 @@ describe('expanded resource rankings', () => {
   it('ranks disks by used bytes rather than fullness percentage', () => {
     const got = largestDisks([disk('/small-full', 90), disk('/large', 950, 1000), disk('/tiny', 10)], 2);
     expect(got.map((row) => row.mount)).toEqual(['/large', '/small-full']);
+  });
+
+  it('selects the most specific mount for a drill-down path', () => {
+    const disks = [disk('/', 50), disk('/boot', 20), disk('/data/archive', 10)];
+    expect(containingMount('/data/archive/2026/file.zip', disks)?.mount).toBe('/data/archive');
+    expect(containingMount('/boot/grub', disks)?.mount).toBe('/boot');
+  });
+
+  it('navigates up without escaping the selected mount', () => {
+    expect(parentDiskPath('/var/lib/docker', '/')).toBe('/var/lib');
+    expect(parentDiskPath('/data/projects', '/data')).toBe('/data');
+    expect(parentDiskPath('/data', '/data')).toBe('/data');
   });
 });

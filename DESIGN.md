@@ -244,6 +244,12 @@ Routes (stdlib `http.ServeMux`, Go 1.22 patterns; no router dependency):
     the response.
 - `GET /api/history?range=1h|6h|24h|7d|30d` → `{"range":"1h","points":[…]}`.
   Unknown range → 400 JSON `{"error":"..."}`. Points may be empty, never null.
+- `GET /api/disk-usage?path=/var` → on-demand `DiskUsage` with the 10 largest
+  immediate files/directories under the absolute path, recursively measured.
+  Only paths within a reported real filesystem are accepted. The scan never
+  follows symlinks or crosses another mount; it is limited to 30 seconds / 2
+  million entries, cached per path for 5 minutes, and may return flagged
+  partial results. At most two scans run concurrently.
 - `GET /healthz` → `200 ok` when the collector has produced a sample recently
   (within 5× the sample interval); `503` before the first sample or when the
   latest sample is stale (a wedged sampler must flip health so Docker restarts
@@ -333,8 +339,9 @@ Everything the UI consumes, in one place: `GET /api/servers`
 (ServerSummary[]), `GET /api/servers/{id}/host` (HostInfo),
 `GET /api/servers/{id}/live` (SSE: one `hello`, then `snapshot` per tick),
 `GET /api/servers/{id}/history?range=K` (HistoryResponse), and
+`GET /api/servers/{id}/disk-usage?path=P` (DiskUsage), and
 `GET /api/overview/live` (fleet SSE mux, §9.4). The legacy unprefixed
-`/api/host`, `/api/live`, `/api/history` remain as aliases for the local
+`/api/host`, `/api/live`, `/api/history`, `/api/disk-usage` remain as aliases for the local
 server — that alias surface is what hubs consume on peers, so it is frozen.
 Types exactly as in `web/src/lib/types.ts`.
 
@@ -452,8 +459,12 @@ exists.
   `/ · 412 GiB free`; below it a mount list (up to 3 mounts with mini-meters)
   instead of a sparkline. Mount hues come from the shared slot assigner so
   they match the disk chart. The tile is a button; expanding it spans the grid
-  and shows up to 10 mounts ranked by bytes used, including device, used, free
-  and capacity percentage.
+  and scans the fullest mount on demand, showing the 10 immediate files or
+  directories consuming the most allocated space. Directory rows drill down
+  one level at a time; a filesystem picker switches mounts. Each row shows
+  type, recursively measured size, and share of used mount space. Scans are
+  read-only, never cross a mount boundary, stop after 30 seconds or 2 million
+  entries, report partial/unreadable results, and cache each path for 5 minutes.
 - Meter: 4px track, full-width; fill color = series hue normally, switches to
   `--status-warn` ≥ 80%, `--status-critical` ≥ 92%; the unfilled track is the
   same hue at ~18% opacity. When a meter is in a status state, the tile's
@@ -689,7 +700,9 @@ func (c *Client) Recent(id string) []metrics.Snapshot // ring, oldest first, cap
 func (c *Client) IntervalMs(id string) int64
 // History proxies GET <peer>/api/history?range=K with a 15s timeout.
 func (c *Client) History(ctx context.Context, id, rangeKey string) ([]metrics.HistoryPoint, error)
-var ErrUnknownPeer, ErrPeerUnavailable error // History sentinels
+// DiskUsage proxies GET <peer>/api/disk-usage?path=P with a 35s timeout.
+func (c *Client) DiskUsage(ctx context.Context, id, path string) (metrics.DiskUsage, error)
+var ErrUnknownPeer, ErrPeerUnavailable error // proxy sentinels
 ```
 
 Behavior requirements:
@@ -754,7 +767,7 @@ New routes (registered ALWAYS, standalone included — the UI uses only these):
     peer hello, or a status event dropped by the non-blocking broadcast,
     heals within one cycle; the client merges by replacing)
   - heartbeats + write deadlines as everywhere else.
-- Legacy `/api/host`, `/api/live`, `/api/history` remain as aliases for the
+- Legacy `/api/host`, `/api/live`, `/api/history`, `/api/disk-usage` remain as aliases for the
   local server (peer compatibility — a hub can itself be someone's peer).
 - Auth middleware per §9.2 wraps all `/api/` routes when Token is set.
 

@@ -77,6 +77,9 @@ type Collector struct {
 	topProcesses      []metrics.ProcessMemoryMetrics
 	nextProcessSample time.Time
 
+	diskUsageMu    sync.Mutex
+	diskUsageCache map[string]diskUsageCacheEntry
+
 	mu      sync.Mutex
 	ring    []metrics.Snapshot // circular buffer of the most recent snapshots
 	head    int                // next write position in ring
@@ -99,14 +102,15 @@ func New(cfg Config) *Collector {
 		cfg.RingSize = defaultRingSize
 	}
 	c := &Collector{
-		cfg:          cfg,
-		errlog:       newRateLogger(time.Minute),
-		usageFn:      disk.UsageWithContext,
-		usageTimeout: diskUsageTimeout,
-		hungMounts:   make(map[string]time.Time),
-		topProcesses: []metrics.ProcessMemoryMetrics{},
-		ring:         make([]metrics.Snapshot, cfg.RingSize),
-		subs:         make(map[uint64]chan metrics.Snapshot),
+		cfg:            cfg,
+		errlog:         newRateLogger(time.Minute),
+		usageFn:        disk.UsageWithContext,
+		usageTimeout:   diskUsageTimeout,
+		hungMounts:     make(map[string]time.Time),
+		topProcesses:   []metrics.ProcessMemoryMetrics{},
+		diskUsageCache: make(map[string]diskUsageCacheEntry),
+		ring:           make([]metrics.Snapshot, cfg.RingSize),
+		subs:           make(map[uint64]chan metrics.Snapshot),
 	}
 	c.gpu = newGPUPoller(c.errlog)
 

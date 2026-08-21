@@ -28,6 +28,7 @@ type peerSource interface {
 	Subscribe() (<-chan peers.Event, func())
 	Recent(id string) []metrics.Snapshot
 	History(ctx context.Context, id, rangeKey string) ([]metrics.HistoryPoint, error)
+	DiskUsage(ctx context.Context, id, path string) (metrics.DiskUsage, error)
 }
 
 // overviewSnapshotPayload is the overview `snapshot` event body
@@ -199,6 +200,30 @@ func (s *Server) handleServerHistory(w http.ResponseWriter, r *http.Request) {
 		points = []metrics.HistoryPoint{} // contract: empty, never null
 	}
 	writeJSON(w, http.StatusOK, historyResponse{Range: rng.Key, Points: points})
+}
+
+func (s *Server) handleServerDiskUsage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "local" {
+		s.handleDiskUsage(w, r)
+		return
+	}
+	if _, ok := s.peerSummary(id); !ok {
+		writeJSONError(w, http.StatusNotFound, "unknown server")
+		return
+	}
+	usage, err := s.peers.DiskUsage(r.Context(), id, r.URL.Query().Get("path"))
+	switch {
+	case errors.Is(err, peers.ErrUnknownPeer):
+		writeJSONError(w, http.StatusNotFound, "unknown server")
+	case errors.Is(err, peers.ErrPeerUnavailable):
+		writeJSONError(w, http.StatusBadGateway, "peer unreachable")
+	case err != nil:
+		log.Printf("proxy disk usage id=%s path=%q: %v", id, r.URL.Query().Get("path"), err)
+		writeJSONError(w, http.StatusBadGateway, "peer unreachable")
+	default:
+		writeJSON(w, http.StatusOK, usage)
+	}
 }
 
 // handleServerLive streams one server's live data in exactly the v1 wire

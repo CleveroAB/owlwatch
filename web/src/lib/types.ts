@@ -48,6 +48,26 @@ export interface DiskMetrics {
   usedPct: number;
 }
 
+/** On-demand recursive size breakdown for the immediate children of a path. */
+export interface DiskUsage {
+  path: string;
+  mount: string;
+  mountUsed: number;
+  items: DiskUsageItem[];
+  scannedEntries: number;
+  skippedEntries: number;
+  truncated: boolean;
+}
+
+export interface DiskUsageItem {
+  path: string;
+  name: string;
+  kind: 'directory' | 'file';
+  size: number;
+  usedPct: number; // share of used bytes on the containing mount
+  incomplete: boolean;
+}
+
 export interface GPUMetrics {
   index: number;
   name: string;

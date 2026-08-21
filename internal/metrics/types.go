@@ -51,6 +51,28 @@ type DiskMetrics struct {
 	UsedPct float64 `json:"usedPct"`
 }
 
+// DiskUsage is an on-demand breakdown of the immediate children of Path,
+// ranked by recursively measured size. It is not part of the live snapshot:
+// walking a filesystem is intentionally done only when a viewer asks for it.
+type DiskUsage struct {
+	Path           string          `json:"path"`
+	Mount          string          `json:"mount"`
+	MountUsed      uint64          `json:"mountUsed"`
+	Items          []DiskUsageItem `json:"items"`
+	ScannedEntries int64           `json:"scannedEntries"`
+	SkippedEntries int64           `json:"skippedEntries"`
+	Truncated      bool            `json:"truncated"`
+}
+
+type DiskUsageItem struct {
+	Path       string  `json:"path"`
+	Name       string  `json:"name"`
+	Kind       string  `json:"kind"` // "directory" or "file"
+	Size       uint64  `json:"size"`
+	UsedPct    float64 `json:"usedPct"` // share of used bytes on the containing mount
+	Incomplete bool    `json:"incomplete"`
+}
+
 type GPUMetrics struct {
 	Index    int     `json:"index"`
 	Name     string  `json:"name"`
