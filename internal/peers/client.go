@@ -27,10 +27,11 @@ const (
 	// loses events, the peer goroutines never block on it.
 	subscriberBuffer = 16
 
-	defaultBaseBackoff    = 2 * time.Second
-	defaultMaxBackoff     = 30 * time.Second
-	defaultStallTimeout   = 45 * time.Second
-	defaultHistoryTimeout = 15 * time.Second
+	defaultBaseBackoff      = 2 * time.Second
+	defaultMaxBackoff       = 30 * time.Second
+	defaultStallTimeout     = 45 * time.Second
+	defaultHistoryTimeout   = 15 * time.Second
+	defaultDiskUsageTimeout = 35 * time.Second
 
 	// dialTimeout and responseHeaderTimeout bound the connection phases the
 	// stall watchdog cannot see (it only counts response-body bytes): a peer
@@ -40,7 +41,8 @@ const (
 
 	// maxHistoryBytes caps one history response body: a misbehaving peer
 	// streaming a multi-GB JSON array must not cause huge hub allocations.
-	maxHistoryBytes = 8 << 20
+	maxHistoryBytes   = 8 << 20
+	maxDiskUsageBytes = 256 << 10
 
 	// recentCPUPoints is the max length of ServerSummary.RecentCPU (§9.4):
 	// enough for a 60-point overview sparkline.
@@ -146,10 +148,11 @@ type Client struct {
 
 	// Tunables, set to the documented defaults by NewClient; tests shrink
 	// them (same trick as the collector's usageTimeout).
-	baseBackoff    time.Duration // first reconnect delay (2s)
-	maxBackoff     time.Duration // reconnect delay ceiling (30s)
-	stallTimeout   time.Duration // no bytes on the stream for this long → reconnect (45s)
-	historyTimeout time.Duration // bound on one History proxy call (15s)
+	baseBackoff      time.Duration // first reconnect delay (2s)
+	maxBackoff       time.Duration // reconnect delay ceiling (30s)
+	stallTimeout     time.Duration // no bytes on the stream for this long → reconnect (45s)
+	historyTimeout   time.Duration // bound on one History proxy call (15s)
+	diskUsageTimeout time.Duration // bound on one disk breakdown proxy call (35s)
 
 	mu      sync.Mutex
 	states  map[string]*peerState
@@ -184,12 +187,13 @@ func NewClient(peers []Peer) *Client {
 				return fmt.Errorf("peers: refusing redirect to %q", req.URL)
 			},
 		},
-		baseBackoff:    defaultBaseBackoff,
-		maxBackoff:     defaultMaxBackoff,
-		stallTimeout:   defaultStallTimeout,
-		historyTimeout: defaultHistoryTimeout,
-		states:         make(map[string]*peerState, len(peers)),
-		subs:           make(map[uint64]chan Event),
+		baseBackoff:      defaultBaseBackoff,
+		maxBackoff:       defaultMaxBackoff,
+		stallTimeout:     defaultStallTimeout,
+		historyTimeout:   defaultHistoryTimeout,
+		diskUsageTimeout: defaultDiskUsageTimeout,
+		states:           make(map[string]*peerState, len(peers)),
+		subs:             make(map[uint64]chan Event),
 	}
 	for _, p := range c.peers {
 		c.states[p.ID] = &peerState{peer: p, ring: make([]metrics.Snapshot, ringCap)}
@@ -462,6 +466,50 @@ func (c *Client) History(ctx context.Context, id, rangeKey string) ([]metrics.Hi
 		body.Points = []metrics.HistoryPoint{}
 	}
 	return body.Points, nil
+}
+
+// DiskUsage proxies an on-demand filesystem breakdown from one peer. It uses
+// the peer's frozen /api/disk-usage alias, just like History uses /api/history.
+func (c *Client) DiskUsage(ctx context.Context, id, path string) (metrics.DiskUsage, error) {
+	c.mu.Lock()
+	st, ok := c.states[id]
+	c.mu.Unlock()
+	if !ok {
+		return metrics.DiskUsage{}, fmt.Errorf("peers: %q: %w", id, ErrUnknownPeer)
+	}
+	p := st.peer
+
+	timeout := c.diskUsageTimeout
+	if timeout <= 0 {
+		timeout = defaultDiskUsageTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	reqURL := p.URL.String() + "/api/disk-usage?path=" + url.QueryEscape(path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return metrics.DiskUsage{}, fmt.Errorf("peers: %s: building disk usage request: %w", id, err)
+	}
+	if p.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+p.Token)
+	}
+	resp, err := c.httpc.Do(req)
+	if err != nil {
+		return metrics.DiskUsage{}, fmt.Errorf("peers: %s: disk usage: %v: %w", id, err, ErrPeerUnavailable)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return metrics.DiskUsage{}, fmt.Errorf("peers: %s: disk usage returned %q: %w", id, resp.Status, ErrPeerUnavailable)
+	}
+	var body metrics.DiskUsage
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxDiskUsageBytes)).Decode(&body); err != nil {
+		return metrics.DiskUsage{}, fmt.Errorf("peers: %s: decoding disk usage: %v: %w", id, err, ErrPeerUnavailable)
+	}
+	if body.Items == nil {
+		body.Items = []metrics.DiskUsageItem{}
+	}
+	return body, nil
 }
 
 // rateLogger logs a given message key at most once per interval, so a peer

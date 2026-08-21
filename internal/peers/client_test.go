@@ -558,6 +558,38 @@ func TestHistory(t *testing.T) {
 	}
 }
 
+func TestDiskUsage(t *testing.T) {
+	var gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/disk-usage" {
+			http.NotFound(w, r)
+			return
+		}
+		gotPath = r.URL.Query().Get("path")
+		gotAuth = r.Header.Get("Authorization")
+		json.NewEncoder(w).Encode(metrics.DiskUsage{
+			Path: "/var/lib", Mount: "/", MountUsed: 100,
+			Items: []metrics.DiskUsageItem{{Path: "/var/lib/docker", Name: "docker", Kind: "directory", Size: 60}},
+		})
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, testPeer(t, "db1", srv.URL, "tok"))
+	got, err := c.DiskUsage(context.Background(), "db1", "/var/lib")
+	if err != nil {
+		t.Fatalf("DiskUsage() error: %v", err)
+	}
+	if gotPath != "/var/lib" || gotAuth != "Bearer tok" {
+		t.Errorf("peer request path/auth = %q/%q", gotPath, gotAuth)
+	}
+	if len(got.Items) != 1 || got.Items[0].Path != "/var/lib/docker" {
+		t.Errorf("DiskUsage() = %+v, want docker item", got)
+	}
+	if _, err := c.DiskUsage(context.Background(), "ghost", "/"); !errors.Is(err, ErrUnknownPeer) {
+		t.Errorf("DiskUsage(ghost) error = %v, want ErrUnknownPeer", err)
+	}
+}
+
 func TestHistoryPeerFailures(t *testing.T) {
 	t.Run("timeout", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

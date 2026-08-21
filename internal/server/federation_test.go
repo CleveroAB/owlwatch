@@ -21,11 +21,12 @@ import (
 // *peers.Client per the DESIGN.md §9.4 contract, so tests inject the fake
 // directly into Server.peers (same package).
 type fakeFleet struct {
-	mu      sync.Mutex
-	servers []metrics.ServerSummary
-	recent  map[string][]metrics.Snapshot
-	history func(ctx context.Context, id, rangeKey string) ([]metrics.HistoryPoint, error)
-	events  chan peers.Event
+	mu        sync.Mutex
+	servers   []metrics.ServerSummary
+	recent    map[string][]metrics.Snapshot
+	history   func(ctx context.Context, id, rangeKey string) ([]metrics.HistoryPoint, error)
+	diskUsage func(ctx context.Context, id, path string) (metrics.DiskUsage, error)
+	events    chan peers.Event
 }
 
 func (f *fakeFleet) Servers() []metrics.ServerSummary {
@@ -48,6 +49,13 @@ func (f *fakeFleet) Recent(id string) []metrics.Snapshot {
 
 func (f *fakeFleet) History(ctx context.Context, id, rangeKey string) ([]metrics.HistoryPoint, error) {
 	return f.history(ctx, id, rangeKey)
+}
+
+func (f *fakeFleet) DiskUsage(ctx context.Context, id, path string) (metrics.DiskUsage, error) {
+	if f.diskUsage == nil {
+		return metrics.DiskUsage{}, peers.ErrPeerUnavailable
+	}
+	return f.diskUsage(ctx, id, path)
 }
 
 // setHost marks a peer's hello as cached, as the peers client does when the
@@ -332,6 +340,33 @@ func TestHandleServerHistoryPeer(t *testing.T) {
 	}
 	if body := strings.TrimSpace(rec.Body.String()); body != `{"range":"6h","points":[]}` {
 		t.Errorf("body = %q, want empty points array, never null", body)
+	}
+}
+
+func TestHandleServerDiskUsagePeer(t *testing.T) {
+	var gotID, gotPath string
+	fleet := &fakeFleet{
+		servers: []metrics.ServerSummary{{ID: "web1", Name: "web1"}},
+		diskUsage: func(_ context.Context, id, path string) (metrics.DiskUsage, error) {
+			gotID, gotPath = id, path
+			return metrics.DiskUsage{Path: path, Mount: "/", Items: []metrics.DiskUsageItem{}}, nil
+		},
+	}
+	s := newFederationServer(t, fleet)
+	rec := get(t, s, "/api/servers/web1/disk-usage?path=%2Fvar%2Flib")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if gotID != "web1" || gotPath != "/var/lib" {
+		t.Errorf("proxy got id/path = %q/%q, want web1//var/lib", gotID, gotPath)
+	}
+
+	fleet.diskUsage = func(context.Context, string, string) (metrics.DiskUsage, error) {
+		return metrics.DiskUsage{}, peers.ErrPeerUnavailable
+	}
+	rec = get(t, s, "/api/servers/web1/disk-usage?path=%2F")
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("unavailable peer status = %d, want 502", rec.Code)
 	}
 }
 

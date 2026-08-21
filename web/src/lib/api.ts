@@ -12,6 +12,7 @@ import type {
   HelloEvent,
   HistoryResponse,
   HostInfo,
+  DiskUsage,
   OverviewSnapshotEvent,
   OverviewStatusEvent,
   RangeKey,
@@ -397,6 +398,14 @@ export async function fetchHistory(
   signal?: AbortSignal,
 ): Promise<HistoryResponse> {
   return apiGet<HistoryResponse>(`${basePath}/history?range=${range}`, signal);
+}
+
+export async function fetchDiskUsage(
+  basePath: string,
+  path: string,
+  signal?: AbortSignal,
+): Promise<DiskUsage> {
+  return apiGet<DiskUsage>(`${basePath}/disk-usage?path=${encodeURIComponent(path)}`, signal);
 }
 
 export async function fetchHost(basePath: string, signal?: AbortSignal): Promise<HostInfo> {

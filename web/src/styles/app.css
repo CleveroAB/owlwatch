@@ -371,6 +371,115 @@ h2 {
   font-size: 12px;
 }
 
+.disk-browser-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.disk-browser-head h2 {
+  margin-bottom: 3px;
+}
+
+.disk-browser-path {
+  margin: 0;
+  max-width: 680px;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.disk-mount-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.disk-mount-picker select {
+  max-width: 220px;
+  padding: 5px 24px 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.resource-back,
+.disk-entry-link {
+  border: 0;
+  background: transparent;
+  color: var(--series-1);
+  font: inherit;
+  cursor: pointer;
+}
+
+.resource-back {
+  padding: 2px 0 10px;
+  font-size: 12px;
+}
+
+.resource-back:hover,
+.disk-entry-link:hover {
+  text-decoration: underline;
+}
+
+.resource-back:focus-visible,
+.disk-entry-link:focus-visible,
+.disk-mount-picker select:focus-visible {
+  outline: 2px solid var(--series-1);
+  outline-offset: 2px;
+}
+
+.disk-entry-link {
+  width: 100%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+}
+
+.disk-entry-link span {
+  font-size: 18px;
+  line-height: 0.7;
+}
+
+.disk-usage-table td:first-child {
+  min-width: 180px;
+}
+
+.resource-share {
+  min-width: 150px;
+  display: grid;
+  grid-template-columns: 48px minmax(80px, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.resource-share .meter {
+  margin-top: 0;
+}
+
+.disk-scan-summary {
+  margin: 10px 0 0;
+  color: var(--ink-muted);
+  font-size: 11px;
+}
+
+.disk-scan-warning {
+  color: var(--status-warn);
+}
+
 /* ---------- history section ---------- */
 
 .history {
@@ -855,5 +964,18 @@ table.data {
   .chart-body,
   .tile-chevron {
     transition: none;
+  }
+
+  .disk-browser-head {
+    flex-direction: column;
+  }
+
+  .disk-mount-picker {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .disk-mount-picker select {
+    max-width: 65%;
   }
 }

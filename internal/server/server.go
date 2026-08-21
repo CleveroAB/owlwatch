@@ -72,6 +72,7 @@ func New(cfg Config) *Server {
 	mux.HandleFunc("GET /api/servers", s.handleServers)
 	mux.HandleFunc("GET /api/servers/{id}/host", s.handleServerHost)
 	mux.HandleFunc("GET /api/servers/{id}/history", s.handleServerHistory)
+	mux.HandleFunc("GET /api/servers/{id}/disk-usage", s.handleServerDiskUsage)
 	mux.HandleFunc("GET /api/servers/{id}/live", s.handleServerLive)
 	mux.HandleFunc("GET /api/overview/live", s.handleOverviewLive)
 	// Email alerting (DESIGN.md §3.4). POST /api/alerts/test is the API's
@@ -83,6 +84,7 @@ func New(cfg Config) *Server {
 	mux.HandleFunc("GET /api/host", s.handleHost)
 	mux.HandleFunc("GET /api/live", s.handleLive)
 	mux.HandleFunc("GET /api/history", s.handleHistory)
+	mux.HandleFunc("GET /api/disk-usage", s.handleDiskUsage)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.Handle("/", newUIHandler())
 
@@ -169,6 +171,21 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		points = []metrics.HistoryPoint{} // contract: empty, never null
 	}
 	writeJSON(w, http.StatusOK, historyResponse{Range: rng.Key, Points: points})
+}
+
+func (s *Server) handleDiskUsage(w http.ResponseWriter, r *http.Request) {
+	usage, err := s.cfg.Collector.DiskUsage(r.Context(), r.URL.Query().Get("path"))
+	switch {
+	case errors.Is(err, collector.ErrInvalidDiskPath):
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, collector.ErrDiskUnavailable):
+		writeJSONError(w, http.StatusNotFound, err.Error())
+	case err != nil:
+		log.Printf("disk usage path=%q: %v", r.URL.Query().Get("path"), err)
+		writeJSONError(w, http.StatusInternalServerError, "disk usage scan failed")
+	default:
+		writeJSON(w, http.StatusOK, usage)
+	}
 }
 
 // handleHealthz reports 200 only while the sampler is live: a sample must

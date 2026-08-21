@@ -1,7 +1,8 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
+import { fetchDiskUsage, serverBase } from '../lib/api';
 import { mountColor, registerMounts } from '../lib/diskSlots';
 import { formatBytes, formatBytesTick, formatGiBPair, formatPct, truncateMountPath } from '../lib/format';
-import type { DiskMetrics, HostInfo, MemMetrics, ProcessMemoryMetrics, Snapshot } from '../lib/types';
+import type { DiskMetrics, DiskUsage, HostInfo, MemMetrics, ProcessMemoryMetrics, Snapshot } from '../lib/types';
 import { Meter, meterFlag, type MeterFlag } from './Meter';
 import { Sparkline } from './Sparkline';
 
@@ -223,7 +224,7 @@ function DiskTile({ serverId, latest }: { serverId: string; latest: Snapshot | n
       flag={fullest ? meterFlag(fullest.usedPct) : null}
       expanded={expanded}
       onToggle={() => setExpanded((open) => !open)}
-      details={<DiskDetails disks={disks} />}
+      details={<DiskDetails serverId={serverId} disks={disks} />}
     >
       {byUsage.length > 0 && (
         <div className="mounts">
@@ -242,41 +243,124 @@ function DiskTile({ serverId, latest }: { serverId: string; latest: Snapshot | n
   );
 }
 
-function DiskDetails({ disks }: { disks: Snapshot['disks'] }) {
-  const bySpace = largestDisks(disks);
+function DiskDetails({ serverId, disks }: { serverId: string; disks: Snapshot['disks'] }) {
+  const mounts = largestDisks(disks);
+  const fullestMount = [...disks].sort((a, b) => b.usedPct - a.usedPct)[0]?.mount ?? '';
+  const [path, setPath] = useState(fullestMount);
+  const [usage, setUsage] = useState<DiskUsage | null>(null);
+  const [loading, setLoading] = useState(path !== '');
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!path) return;
+    const ctrl = new AbortController();
+    setLoading(true);
+    setError(false);
+    setUsage(null);
+    fetchDiskUsage(serverBase(serverId), path, ctrl.signal)
+      .then(setUsage)
+      .catch((err: unknown) => {
+        if (!(err instanceof DOMException && err.name === 'AbortError')) setError(true);
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setLoading(false);
+      });
+    return () => ctrl.abort();
+  }, [path, serverId]);
+
+  const mount = usage?.mount ?? containingMount(path, disks)?.mount ?? '';
+  const canGoUp = path !== '' && mount !== '' && path !== mount;
   return (
     <>
-      <h2>Largest disks by used space</h2>
-      {bySpace.length === 0 ? (
-        <p className="resource-empty">Disk details unavailable.</p>
-      ) : (
-        <div className="resource-table-wrap">
-          <table className="resource-table">
-            <thead>
-              <tr>
-                <th scope="col">Mount</th>
-                <th scope="col">Device</th>
-                <th scope="col">Used</th>
-                <th scope="col">Free</th>
-                <th scope="col">Capacity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bySpace.map((disk) => (
-                <tr key={disk.mount}>
-                  <td title={disk.mount}>{truncateMountPath(disk.mount, 42)}</td>
-                  <td title={disk.device}>{disk.device}</td>
-                  <td>{formatBytes(disk.used)}</td>
-                  <td>{formatBytes(disk.free)}</td>
-                  <td>{formatPct(disk.usedPct)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="disk-browser-head">
+        <div>
+          <h2>Largest files and directories</h2>
+          <p className="disk-browser-path" title={path}>{path || 'No filesystem selected'}</p>
         </div>
+        {mounts.length > 0 && (
+          <label className="disk-mount-picker">
+            <span>Filesystem</span>
+            <select value={mount} onChange={(event) => setPath(event.target.value)}>
+              {mounts.map((disk) => (
+                <option key={disk.mount} value={disk.mount}>
+                  {disk.mount} · {formatBytes(disk.used)} used
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+      {canGoUp && (
+        <button type="button" className="resource-back" onClick={() => setPath(parentDiskPath(path, mount))}>
+          ← Up one level
+        </button>
+      )}
+      {mounts.length === 0 ? (
+        <p className="resource-empty">Disk details unavailable.</p>
+      ) : loading ? (
+        <p className="resource-empty" role="status">Scanning {path} for the largest items…</p>
+      ) : error || !usage ? (
+        <p className="resource-empty" role="alert">Could not scan this location. It may be unreadable or the server may be offline.</p>
+      ) : usage.items.length === 0 ? (
+        <p className="resource-empty">No readable files or directories in this location.</p>
+      ) : (
+        <>
+          <div className="resource-table-wrap">
+            <table className="resource-table disk-usage-table">
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Size</th>
+                  <th scope="col">Share of disk usage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usage.items.map((item) => (
+                  <tr key={item.path}>
+                    <td title={item.path}>
+                      {item.kind === 'directory' ? (
+                        <button type="button" className="disk-entry-link" onClick={() => setPath(item.path)}>
+                          {item.name}<span aria-hidden="true">›</span>
+                        </button>
+                      ) : item.name}
+                    </td>
+                    <td>{item.kind === 'directory' ? 'Directory' : 'File'}{item.incomplete ? ' (partial)' : ''}</td>
+                    <td>{item.incomplete ? '≥ ' : ''}{formatBytes(item.size)}</td>
+                    <td>
+                      <div className="resource-share">
+                        <span>{formatPct(item.usedPct)}</span>
+                        <Meter pct={item.usedPct} hue="var(--series-3)" />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className={`disk-scan-summary${usage.truncated ? ' disk-scan-warning' : ''}`}>
+            Scanned {usage.scannedEntries.toLocaleString()} entries
+            {usage.skippedEntries > 0 ? ` · ${usage.skippedEntries.toLocaleString()} unreadable` : ''}
+            {usage.truncated ? ' · Partial results: time or entry safety limit reached' : ''}
+          </p>
+        </>
       )}
     </>
   );
+}
+
+export function containingMount(path: string, disks: DiskMetrics[]): DiskMetrics | null {
+  return [...disks]
+    .filter((disk) => path === disk.mount || path.startsWith(disk.mount === '/' ? '/' : `${disk.mount}/`))
+    .sort((a, b) => b.mount.length - a.mount.length)[0] ?? null;
+}
+
+export function parentDiskPath(path: string, mount: string): string {
+  if (path === mount) return mount;
+  const trimmed = path.replace(/\/+$/, '');
+  const slash = trimmed.lastIndexOf('/');
+  const parent = slash <= 0 ? '/' : trimmed.slice(0, slash);
+  return parent.length < mount.length ? mount : parent;
 }
 
 export function topMemoryProcesses(mem: MemMetrics | null, limit = 10): ProcessMemoryMetrics[] {

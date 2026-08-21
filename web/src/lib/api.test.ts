@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   connectOverview,
+  fetchDiskUsage,
   fetchAlertsInfo,
   fetchServers,
   onUnauthorized,
@@ -191,5 +192,21 @@ describe('email alerts API', () => {
   it('parses the enabled flag', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => respond(200, '{"enabled":true}')));
     await expect(fetchAlertsInfo()).resolves.toEqual({ enabled: true });
+  });
+});
+
+describe('disk usage API', () => {
+  beforeEach(() => stubStorage());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('encodes the drill-down path and authenticates the request', async () => {
+    setToken('disk-secret');
+    const fetchMock = vi.fn<typeof fetch>(async () => respond(200, '{"path":"/var/lib","mount":"/","mountUsed":100,"items":[],"scannedEntries":0,"skippedEntries":0,"truncated":false}'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchDiskUsage('/api/servers/local', '/var/lib & data');
+    const [path, init] = fetchMock.mock.calls[0]!;
+    expect(path).toBe('/api/servers/local/disk-usage?path=%2Fvar%2Flib%20%26%20data');
+    expect(init?.headers).toEqual({ Authorization: 'Bearer disk-secret' });
   });
 });

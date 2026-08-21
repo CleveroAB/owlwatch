@@ -14,8 +14,10 @@ to 30 days). No agents, no external database, no config files.
 [light theme](docs/screenshot-light.png).*
 
 Press the Memory or Disk card to expand it. Memory shows the ten processes
-using the most resident RAM; Disk shows up to ten mounts ranked by used space,
-with their device, used, free and capacity statistics.
+using the most resident RAM. Disk scans the selected filesystem on demand and
+shows the ten files or directories consuming the most allocated space; select
+a directory to drill down and find the specific logs, databases, archives, or
+other contents responsible.
 
 ## Security and exposure
 
@@ -328,13 +330,14 @@ with an `Authorization: Bearer` header — `/healthz` never does.
 | `GET /api/servers/{id}/host` | static host identity: hostname, platform, kernel, CPU model, cores, total memory, boot time, GPU names, owlwatch version. `404` unknown id, `502` if the peer has never been reached |
 | `GET /api/servers/{id}/live` | SSE stream — one `hello` event on connect (`{host, recent, intervalMs}` with the last ~5 min of samples and the sample interval), then a `snapshot` event per sample (every 2 s by default); comment heartbeat every 15 s |
 | `GET /api/servers/{id}/history?range=1h\|6h\|24h\|7d\|30d` | `{range, points}` — server-side bucketed aggregates (≤ ~400 points per response); proxied from the peer for peer ids. Unknown range → `400`, unknown id → `404`, unreachable peer → `502` |
+| `GET /api/servers/{id}/disk-usage?path=/var` | on-demand recursive size breakdown of the ten largest immediate files/directories under an absolute path; directories can be queried again to drill down. Scans stay within a reported disk, do not cross mounts, and are bounded/cached |
 | `GET /api/overview/live` | SSE stream for the whole fleet — a `servers` event on connect (full `ServerSummary[]`), then `snapshot` events (`{id, snapshot}`) for every server and `status` events (`{id, online, lastSeen}`) on peer transitions |
 | `GET /healthz` | `200 ok` while the latest sample is fresh (within 5× the sample interval), `503` before the first sample or when sampling has stalled; drives the Docker `HEALTHCHECK` |
 | `GET /api/alerts` | `{"enabled": bool}` — whether this instance has [email alerts](#email-alerts) configured |
 | `POST /api/alerts/test` | sends the test alert email to the configured recipients: `200 {"ok":true}`, `409` when alerting is not configured, `502` with the SMTP error when the send fails |
 
-The unprefixed v1 endpoints — `GET /api/host`, `GET /api/live`,
-`GET /api/history` — remain as aliases for the local server. That alias
+The unprefixed peer endpoints — `GET /api/host`, `GET /api/live`,
+`GET /api/history`, `GET /api/disk-usage` — remain as aliases for the local server. That alias
 surface is what a hub consumes on its peers, so it is frozen: older and newer
 instances federate cleanly.
 
