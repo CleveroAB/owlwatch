@@ -28,6 +28,14 @@ export interface MemMetrics {
   usedPct: number;
   swapTotal: number;
   swapUsed: number;
+  topProcesses?: ProcessMemoryMetrics[]; // at most 10, largest resident set first
+}
+
+export interface ProcessMemoryMetrics {
+  pid: number;
+  name: string;
+  used: number; // resident set size in bytes
+  usedPct: number; // share of total host memory
 }
 
 export interface DiskMetrics {

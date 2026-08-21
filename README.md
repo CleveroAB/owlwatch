@@ -13,6 +13,10 @@ to 30 days). No agents, no external database, no config files.
 *Dark is the default theme; here is the same dashboard in the
 [light theme](docs/screenshot-light.png).*
 
+Press the Memory or Disk card to expand it. Memory shows the ten processes
+using the most resident RAM; Disk shows up to ten mounts ranked by used space,
+with their device, used, free and capacity statistics.
+
 ## Security and exposure
 
 > [!WARNING]

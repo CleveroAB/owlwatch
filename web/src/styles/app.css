@@ -178,6 +178,54 @@ h2 {
   min-width: 0;
 }
 
+.tile-expandable {
+  padding: 0;
+}
+
+.tile-expanded {
+  grid-column: 1 / -1;
+}
+
+.tile-trigger {
+  position: relative;
+  width: 100%;
+  padding: 16px 42px 16px 18px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.tile-trigger:hover {
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+}
+
+.tile-trigger:focus-visible {
+  outline: 2px solid var(--series-1);
+  outline-offset: 2px;
+}
+
+.tile-chevron {
+  position: absolute;
+  top: 17px;
+  right: 18px;
+  color: var(--ink-muted);
+  font-size: 20px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 0.2s ease;
+}
+
+.tile-expanded .tile-chevron {
+  transform: rotate(180deg);
+}
+
 .tile-label {
   font-size: 12px;
   color: var(--ink-muted);
@@ -261,6 +309,66 @@ h2 {
 .mount-row .meter {
   grid-column: 1 / -1;
   margin-top: 3px;
+}
+
+.resource-details {
+  padding: 14px 18px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.resource-details h2 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.resource-table-wrap {
+  overflow-x: auto;
+}
+
+.resource-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.resource-table th,
+.resource-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.resource-table th {
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+
+.resource-table th:first-child,
+.resource-table td:first-child,
+.resource-table th:nth-child(2),
+.resource-table td:nth-child(2) {
+  text-align: left;
+}
+
+.resource-table td:first-child,
+.resource-table td:nth-child(2) {
+  max-width: 280px;
+  overflow: hidden;
+  color: var(--ink-2);
+  text-overflow: ellipsis;
+}
+
+.resource-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.resource-empty {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
 }
 
 /* ---------- history section ---------- */
@@ -744,7 +852,8 @@ table.data {
 
 @media (prefers-reduced-motion: reduce) {
   .meter-fill,
-  .chart-body {
+  .chart-body,
+  .tile-chevron {
     transition: none;
   }
 }

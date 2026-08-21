@@ -122,6 +122,26 @@ func mounts(parts []disk.PartitionStat) []string {
 	return out
 }
 
+func TestRankProcessesOrdersByResidentMemoryAndLimitsResults(t *testing.T) {
+	rows := make([]metrics.ProcessMemoryMetrics, 12)
+	for i := range rows {
+		rows[i] = metrics.ProcessMemoryMetrics{PID: int32(20 - i), Used: uint64(i / 2)}
+	}
+
+	got := rankProcesses(rows, 10)
+	if len(got) != 10 {
+		t.Fatalf("rankProcesses() returned %d rows, want 10", len(got))
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i-1].Used < got[i].Used {
+			t.Fatalf("rankProcesses() is not descending at %d: %v", i, got)
+		}
+		if got[i-1].Used == got[i].Used && got[i-1].PID > got[i].PID {
+			t.Fatalf("rankProcesses() did not use PID tie-break at %d: %v", i, got)
+		}
+	}
+}
+
 func TestDiskUsagesSkipsHungMounts(t *testing.T) {
 	c := newTestCollector(4)
 	c.usageTimeout = 20 * time.Millisecond

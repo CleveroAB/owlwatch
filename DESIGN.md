@@ -106,13 +106,18 @@ func (c *Collector) HostInfo() metrics.HostInfo      // cached at startup
 
 Implementation notes:
 
-- Use `github.com/shirou/gopsutil/v4` (`cpu`, `mem`, `disk`, `load`, `host`
+- Use `github.com/shirou/gopsutil/v4` (`cpu`, `mem`, `process`, `disk`, `load`, `host`
   subpackages) with the `WithContext` variants. gopsutil natively honors
   `HOST_PROC`/`HOST_SYS` env vars — no extra work for CPU/mem/load in Docker.
 - **CPU:** `cpu.Percent(0, false)` for combined and `cpu.Percent(0, true)` for
   per-core (delta since previous call — call once at startup to prime, and
   never pass a non-zero interval, which would sleep). Load via
   `load.Avg()` (returns zeros on platforms without it — fine).
+- **Memory:** read aggregate RAM and swap with `mem`, then rank processes by
+  resident set size. Include only the largest 10 in `MemMetrics.TopProcesses`
+  and refresh that ranking every 10 seconds (with a 2-second timeout) so the
+  normal collector tick stays inexpensive. A process that exits during the
+  walk is skipped.
 - **Disk:** enumerate `disk.Partitions(false)`. Keep only real filesystems
   (allowlist: ext4, ext3, ext2, xfs, btrfs, zfs, apfs, hfs, hfsplus, ntfs,
   fuseblk, vfat, exfat, f2fs). Skip mounts under `/boot/efi`, `/System`,
@@ -436,7 +441,9 @@ exists.
 - **CPU** — value: `37.4%`; sublabel: `12 cores · load 1.24`; sparkline of
   usagePct; meter of usagePct.
 - **Memory** — value: `12.4 GiB`; sublabel: `of 32 GiB · 39%` (+ swap when
-  swapUsed > 0); sparkline of usedPct; meter of usedPct.
+  swapUsed > 0); sparkline of usedPct; meter of usedPct. The tile is a button;
+  expanding it spans the grid and shows the 10 processes using the most
+  resident memory, with PID, bytes used and share of host RAM.
 - **GPU** (hidden entirely when `hasGPU` is false) — value: `62%`; sublabel:
   `GPU name · 4.1 / 24 GiB · 61°C`; sparkline of utilPct (first GPU, or avg);
   meter of utilPct. Multiple GPUs: tile shows the average and the sublabel
@@ -444,7 +451,9 @@ exists.
 - **Disk** — headline is the fullest real mount: value `72%`; sublabel
   `/ · 412 GiB free`; below it a mount list (up to 3 mounts with mini-meters)
   instead of a sparkline. Mount hues come from the shared slot assigner so
-  they match the disk chart.
+  they match the disk chart. The tile is a button; expanding it spans the grid
+  and shows up to 10 mounts ranked by bytes used, including device, used, free
+  and capacity percentage.
 - Meter: 4px track, full-width; fill color = series hue normally, switches to
   `--status-warn` ≥ 80%, `--status-critical` ≥ 92%; the unfilled track is the
   same hue at ~18% opacity. When a meter is in a status state, the tile's
@@ -601,8 +610,9 @@ sells and operates it.
 
 ## 8. Non-goals (do not build)
 
-Network I/O metrics, per-process lists, AMD/Intel/Apple GPU support (NVIDIA
-only), historical per-core CPU, config files. The GPU history aggregates
+Network I/O metrics, per-process history or CPU metrics, AMD/Intel/Apple GPU
+support (NVIDIA only), historical per-core CPU, config files. The GPU history
+aggregates
 across cards (per-GPU history is future work). Multi-host monitoring and token
 auth are included in the public v1 contract — see §9. Email alerts exist
 (§3.4) but stay deliberately minimal: fixed email layout, local metrics only,
