@@ -6,6 +6,7 @@ package collector
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/load"
 	"github.com/shirou/gopsutil/v4/mem"
+	"github.com/shirou/gopsutil/v4/process"
 
 	"github.com/CleveroAB/owlwatch/internal/metrics"
 )
@@ -39,6 +41,12 @@ const (
 	// diskReprobeInterval is how long a timed-out mount stays skipped before
 	// the sampler tries it again — same backoff pattern as nvidia-smi.
 	diskReprobeInterval = time.Minute
+
+	// Walking every process is more expensive than reading aggregate memory.
+	// Refresh this ranking independently of the two-second collector tick.
+	processSampleInterval = 10 * time.Second
+	processSampleTimeout  = 2 * time.Second
+	topProcessCount       = 10
 )
 
 // Config configures a Collector. Zero values fall back to the documented
@@ -64,6 +72,10 @@ type Collector struct {
 	// hungMounts maps a mountpoint whose statfs timed out to the earliest
 	// time it may be probed again. Only touched from the Run goroutine.
 	hungMounts map[string]time.Time
+
+	// Only touched by the Run goroutine.
+	topProcesses      []metrics.ProcessMemoryMetrics
+	nextProcessSample time.Time
 
 	mu      sync.Mutex
 	ring    []metrics.Snapshot // circular buffer of the most recent snapshots
@@ -92,6 +104,7 @@ func New(cfg Config) *Collector {
 		usageFn:      disk.UsageWithContext,
 		usageTimeout: diskUsageTimeout,
 		hungMounts:   make(map[string]time.Time),
+		topProcesses: []metrics.ProcessMemoryMetrics{},
 		ring:         make([]metrics.Snapshot, cfg.RingSize),
 		subs:         make(map[uint64]chan metrics.Snapshot),
 	}
@@ -256,7 +269,7 @@ func (c *Collector) sampleCPU(ctx context.Context) metrics.CPUMetrics {
 }
 
 func (c *Collector) sampleMem(ctx context.Context) metrics.MemMetrics {
-	var m metrics.MemMetrics
+	m := metrics.MemMetrics{TopProcesses: []metrics.ProcessMemoryMetrics{}}
 	if vm, err := mem.VirtualMemoryWithContext(ctx); err != nil {
 		c.errlog.printf("mem", "collector: virtual memory: %v", err)
 	} else {
@@ -271,7 +284,64 @@ func (c *Collector) sampleMem(ctx context.Context) metrics.MemMetrics {
 		m.SwapTotal = sw.Total
 		m.SwapUsed = sw.Used
 	}
+	m.TopProcesses = c.sampleTopProcesses(ctx, m.Total)
 	return m
+}
+
+// sampleTopProcesses returns a cached resident-memory ranking. Processes can
+// exit while /proc is being walked, so failures for individual rows are
+// expected and skipped.
+func (c *Collector) sampleTopProcesses(ctx context.Context, totalMemory uint64) []metrics.ProcessMemoryMetrics {
+	now := time.Now()
+	if now.Before(c.nextProcessSample) {
+		return append([]metrics.ProcessMemoryMetrics(nil), c.topProcesses...)
+	}
+	c.nextProcessSample = now.Add(processSampleInterval)
+
+	probeCtx, cancel := context.WithTimeout(ctx, processSampleTimeout)
+	defer cancel()
+	processes, err := process.ProcessesWithContext(probeCtx)
+	if err != nil {
+		c.errlog.printf("processes", "collector: listing processes: %v", err)
+		return append([]metrics.ProcessMemoryMetrics(nil), c.topProcesses...)
+	}
+
+	rows := make([]metrics.ProcessMemoryMetrics, 0, len(processes))
+	for _, p := range processes {
+		if probeCtx.Err() != nil {
+			break
+		}
+		memory, err := p.MemoryInfoWithContext(probeCtx)
+		if err != nil || memory == nil || memory.RSS == 0 {
+			continue
+		}
+		name, err := p.NameWithContext(probeCtx)
+		if err != nil || strings.TrimSpace(name) == "" {
+			name = fmt.Sprintf("PID %d", p.Pid)
+		}
+		usedPct := 0.0
+		if totalMemory > 0 {
+			usedPct = float64(memory.RSS) / float64(totalMemory) * 100
+		}
+		rows = append(rows, metrics.ProcessMemoryMetrics{
+			PID: p.Pid, Name: name, Used: memory.RSS, UsedPct: usedPct,
+		})
+	}
+	c.topProcesses = rankProcesses(rows, topProcessCount)
+	return append([]metrics.ProcessMemoryMetrics(nil), c.topProcesses...)
+}
+
+func rankProcesses(rows []metrics.ProcessMemoryMetrics, limit int) []metrics.ProcessMemoryMetrics {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Used == rows[j].Used {
+			return rows[i].PID < rows[j].PID
+		}
+		return rows[i].Used > rows[j].Used
+	})
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows
 }
 
 // sampleDisks enumerates partitions, filters them to real filesystems and

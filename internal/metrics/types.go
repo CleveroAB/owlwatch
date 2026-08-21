@@ -23,12 +23,22 @@ type CPUMetrics struct {
 }
 
 type MemMetrics struct {
-	Total     uint64  `json:"total"` // bytes
-	Used      uint64  `json:"used"`
-	Available uint64  `json:"available"`
-	UsedPct   float64 `json:"usedPct"`
-	SwapTotal uint64  `json:"swapTotal"`
-	SwapUsed  uint64  `json:"swapUsed"`
+	Total        uint64                 `json:"total"` // bytes
+	Used         uint64                 `json:"used"`
+	Available    uint64                 `json:"available"`
+	UsedPct      float64                `json:"usedPct"`
+	SwapTotal    uint64                 `json:"swapTotal"`
+	SwapUsed     uint64                 `json:"swapUsed"`
+	TopProcesses []ProcessMemoryMetrics `json:"topProcesses"`
+}
+
+// ProcessMemoryMetrics is one process ranked by resident memory usage.
+// Snapshots carry at most ten entries, largest first.
+type ProcessMemoryMetrics struct {
+	PID     int32   `json:"pid"`
+	Name    string  `json:"name"`
+	Used    uint64  `json:"used"`    // resident set size in bytes
+	UsedPct float64 `json:"usedPct"` // share of total host memory
 }
 
 type DiskMetrics struct {
