@@ -277,6 +277,15 @@ Each instance alerts on its own metrics. In a [federated](#monitoring-multiple-s
 setup, give every peer its own SMTP settings — the hub does not alert on
 behalf of peers.
 
+### Rebooting Owlwatch
+
+The bottom of each server dashboard has a **Reboot server** button. After a
+confirmation, Owlwatch closes its live streams and SQLite store cleanly,
+starts the monitoring process again, and the dashboard reconnects
+automatically. On a hub, the action is forwarded to the server whose dashboard
+is open. This restarts Owlwatch itself; it does not reboot the host operating
+system.
+
 ### URL parameters
 
 The dashboard theme normally follows the toggle in the header (persisted to
@@ -331,13 +340,14 @@ with an `Authorization: Bearer` header — `/healthz` never does.
 | `GET /api/servers/{id}/live` | SSE stream — one `hello` event on connect (`{host, recent, intervalMs}` with the last ~5 min of samples and the sample interval), then a `snapshot` event per sample (every 2 s by default); comment heartbeat every 15 s |
 | `GET /api/servers/{id}/history?range=1h\|6h\|24h\|7d\|30d` | `{range, points}` — server-side bucketed aggregates (≤ ~400 points per response); proxied from the peer for peer ids. Unknown range → `400`, unknown id → `404`, unreachable peer → `502` |
 | `GET /api/servers/{id}/disk-usage?path=/var` | on-demand recursive size breakdown of the ten largest immediate files/directories under an absolute path; directories can be queried again to drill down. Scans stay within a reported disk, do not cross mounts, and are bounded/cached |
+| `POST /api/servers/{id}/reboot` | gracefully restarts the selected Owlwatch server and returns `202 {"accepted":true}`; requires `X-Owlwatch-Action: reboot`, and is proxied to peers by a hub |
 | `GET /api/overview/live` | SSE stream for the whole fleet — a `servers` event on connect (full `ServerSummary[]`), then `snapshot` events (`{id, snapshot}`) for every server and `status` events (`{id, online, lastSeen}`) on peer transitions |
 | `GET /healthz` | `200 ok` while the latest sample is fresh (within 5× the sample interval), `503` before the first sample or when sampling has stalled; drives the Docker `HEALTHCHECK` |
 | `GET /api/alerts` | `{"enabled": bool}` — whether this instance has [email alerts](#email-alerts) configured |
 | `POST /api/alerts/test` | sends the test alert email to the configured recipients: `200 {"ok":true}`, `409` when alerting is not configured, `502` with the SMTP error when the send fails |
 
 The unprefixed peer endpoints — `GET /api/host`, `GET /api/live`,
-`GET /api/history`, `GET /api/disk-usage` — remain as aliases for the local server. That alias
+`GET /api/history`, `GET /api/disk-usage`, `POST /api/reboot` — remain as aliases for the local server. That alias
 surface is what a hub consumes on its peers, so it is frozen: older and newer
 instances federate cleanly.
 

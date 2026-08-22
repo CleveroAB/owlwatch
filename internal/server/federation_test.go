@@ -26,6 +26,7 @@ type fakeFleet struct {
 	recent    map[string][]metrics.Snapshot
 	history   func(ctx context.Context, id, rangeKey string) ([]metrics.HistoryPoint, error)
 	diskUsage func(ctx context.Context, id, path string) (metrics.DiskUsage, error)
+	reboot    func(ctx context.Context, id string) error
 	events    chan peers.Event
 }
 
@@ -56,6 +57,13 @@ func (f *fakeFleet) DiskUsage(ctx context.Context, id, path string) (metrics.Dis
 		return metrics.DiskUsage{}, peers.ErrPeerUnavailable
 	}
 	return f.diskUsage(ctx, id, path)
+}
+
+func (f *fakeFleet) Reboot(ctx context.Context, id string) error {
+	if f.reboot == nil {
+		return peers.ErrPeerUnavailable
+	}
+	return f.reboot(ctx, id)
 }
 
 // setHost marks a peer's hello as cached, as the peers client does when the

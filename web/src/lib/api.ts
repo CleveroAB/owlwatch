@@ -242,6 +242,9 @@ function connectStream({ path, onState, events }: StreamSpec): () => void {
       }
       onState('open');
       await consume(res.body);
+      // A graceful server shutdown closes the stream without throwing. It is
+      // still a disconnect: surface it immediately while the retry is queued.
+      if (!closed && current === generation) onState('reconnecting');
     } catch (err) {
       if (closed || current !== generation) return;
       if (err instanceof UnauthorizedError) return;
@@ -389,6 +392,24 @@ export async function sendTestAlertEmail(): Promise<void> {
   if (!res.ok) {
     const body = safeParse<{ error?: string }>(await res.text().catch(() => ''));
     throw new Error(body?.error ?? `POST /api/alerts/test: HTTP ${res.status}`);
+  }
+}
+
+/** Ask one monitored owlwatch server to shut down cleanly and start again. */
+export async function rebootServer(id: string): Promise<void> {
+  const path = `${serverBase(id)}/reboot`;
+  const token = getToken();
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: authHeaders({ 'X-Owlwatch-Action': 'reboot' }),
+  });
+  if (res.status === 401) {
+    reportUnauthorized(token);
+    throw new UnauthorizedError(path);
+  }
+  if (!res.ok) {
+    const body = safeParse<{ error?: string }>(await res.text().catch(() => ''));
+    throw new Error(body?.error ?? `POST ${path}: HTTP ${res.status}`);
   }
 }
 

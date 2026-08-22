@@ -5,6 +5,7 @@ import {
   fetchAlertsInfo,
   fetchServers,
   onUnauthorized,
+  rebootServer,
   sendTestAlertEmail,
   setToken,
   UnauthorizedError,
@@ -119,13 +120,15 @@ describe('authenticated fetch streaming', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     const onServers = vi.fn();
+    const onState = vi.fn();
     const stop = connectOverview({
       onServers,
       onSnapshot: vi.fn(),
       onStatus: vi.fn(),
-      onState: vi.fn(),
+      onState,
     });
     await vi.waitFor(() => expect(onServers).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(onState).toHaveBeenCalledWith('reconnecting'));
     stop();
 
     const [path, init] = fetchMock.mock.calls[0]!;
@@ -192,6 +195,34 @@ describe('email alerts API', () => {
   it('parses the enabled flag', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => respond(200, '{"enabled":true}')));
     await expect(fetchAlertsInfo()).resolves.toEqual({ enabled: true });
+  });
+});
+
+describe('server reboot API', () => {
+  beforeEach(() => stubStorage());
+  afterEach(() => {
+    onUnauthorized(null);
+    vi.unstubAllGlobals();
+  });
+
+  it('posts the confirmation header and bearer token to the scoped server', async () => {
+    setToken('reboot-secret');
+    const fetchMock = vi.fn(async () => respond(202, '{"accepted":true}'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await rebootServer('Web One');
+    const [path, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(path).toBe('/api/servers/Web%20One/reboot');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toMatchObject({
+      Authorization: 'Bearer reboot-secret',
+      'X-Owlwatch-Action': 'reboot',
+    });
+  });
+
+  it('surfaces the server error', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => respond(502, '{"error":"peer unreachable"}')));
+    await expect(rebootServer('web1')).rejects.toThrow('peer unreachable');
   });
 });
 

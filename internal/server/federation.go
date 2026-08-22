@@ -29,6 +29,7 @@ type peerSource interface {
 	Recent(id string) []metrics.Snapshot
 	History(ctx context.Context, id, rangeKey string) ([]metrics.HistoryPoint, error)
 	DiskUsage(ctx context.Context, id, path string) (metrics.DiskUsage, error)
+	Reboot(ctx context.Context, id string) error
 }
 
 // overviewSnapshotPayload is the overview `snapshot` event body
@@ -224,6 +225,35 @@ func (s *Server) handleServerDiskUsage(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, usage)
 	}
+}
+
+func (s *Server) handleServerReboot(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "local" {
+		s.handleReboot(w, r)
+		return
+	}
+	if _, ok := s.peerSummary(id); !ok {
+		writeJSONError(w, http.StatusNotFound, "unknown server")
+		return
+	}
+	if r.Header.Get(rebootActionHeader) != "reboot" {
+		writeJSONError(w, http.StatusForbidden, "reboot confirmation header is required")
+		return
+	}
+	if err := s.peers.Reboot(r.Context(), id); err != nil {
+		switch {
+		case errors.Is(err, peers.ErrUnknownPeer):
+			writeJSONError(w, http.StatusNotFound, "unknown server")
+		case errors.Is(err, peers.ErrPeerUnavailable):
+			writeJSONError(w, http.StatusBadGateway, "peer unreachable")
+		default:
+			log.Printf("proxy reboot id=%s: %v", id, err)
+			writeJSONError(w, http.StatusBadGateway, "peer reboot failed")
+		}
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]bool{"accepted": true})
 }
 
 // handleServerLive streams one server's live data in exactly the v1 wire

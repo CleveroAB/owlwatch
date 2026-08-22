@@ -771,6 +771,52 @@ func TestRunClosesSubscribersOnCancel(t *testing.T) {
 	cancel2()
 }
 
+func TestRebootPostsAuthenticatedConfirmedRequest(t *testing.T) {
+	type requestInfo struct {
+		method string
+		path   string
+		auth   string
+		action string
+	}
+	requests := make(chan requestInfo, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- requestInfo{
+			method: r.Method,
+			path:   r.URL.Path,
+			auth:   r.Header.Get("Authorization"),
+			action: r.Header.Get("X-Owlwatch-Action"),
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer srv.Close()
+
+	c := NewClient([]Peer{testPeer(t, "web1", srv.URL, "peer-secret")})
+	if err := c.Reboot(context.Background(), "web1"); err != nil {
+		t.Fatalf("Reboot: %v", err)
+	}
+	got := <-requests
+	if got.method != http.MethodPost || got.path != "/api/reboot" ||
+		got.auth != "Bearer peer-secret" || got.action != "reboot" {
+		t.Fatalf("request = %+v, want authenticated confirmed POST /api/reboot", got)
+	}
+}
+
+func TestRebootErrors(t *testing.T) {
+	c := NewClient(nil)
+	if err := c.Reboot(context.Background(), "ghost"); !errors.Is(err, ErrUnknownPeer) {
+		t.Fatalf("unknown peer error = %v, want ErrUnknownPeer", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "no", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	c = NewClient([]Peer{testPeer(t, "web1", srv.URL, "")})
+	if err := c.Reboot(context.Background(), "web1"); !errors.Is(err, ErrPeerUnavailable) {
+		t.Fatalf("failed reboot error = %v, want ErrPeerUnavailable", err)
+	}
+}
+
 func TestJitterWithinBounds(t *testing.T) {
 	d := 2 * time.Second
 	for i := 0; i < 1000; i++ {

@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Reboot button at the bottom of each server dashboard. After confirmation it gracefully restarts that Owlwatch process, including remote peers selected through a hub, and reconnects the live dashboard automatically.
 - `docker-compose.yml` can now build the image from the checkout: `docker compose up -d --build` compiles frontend and binary from source instead of requiring a published registry image. Pull-based deployment via `OWLWATCH_VERSION` is unchanged.
 - Test-email button in the dashboard header (visible only when email alerting is configured), backed by `GET /api/alerts` and `POST /api/alerts/test` — the API's first mutating route, token-gated like the rest.
 - Email alerts over plain SMTP (`internal/alerts`): when a metric stays at or above its threshold for a configured duration, owlwatch emails the configured recipients — no new dependencies, stdlib `net/smtp` with opportunistic STARTTLS. Enabled by setting `OWLWATCH_SMTP_HOST`, `OWLWATCH_SMTP_FROM` and `OWLWATCH_ALERT_TO`; thresholds default to CPU 90%, memory 90%, disk 92% (per mount) and GPU 90°C (per card), sustained for `OWLWATCH_ALERT_FOR=5m`, with at most one email per rule per `OWLWATCH_ALERT_COOLDOWN=30m`. Set a threshold to `0` to disable that rule.

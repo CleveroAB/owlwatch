@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -28,6 +30,8 @@ import (
 
 // version is stamped at build time via -ldflags "-X main.version=...".
 var version = "dev"
+
+var errRebootRequested = errors.New("server reboot requested")
 
 type appConfig struct {
 	listenAddress   string
@@ -61,14 +65,23 @@ func main() {
 		os.Exit(runHealthcheck(cfg.port))
 	}
 
-	if err := run(cfg); err != nil {
-		log.Fatalf("owlwatch: %v", err)
+	for {
+		err := run(cfg)
+		if errors.Is(err, errRebootRequested) {
+			log.Printf("reboot complete; starting owlwatch again")
+			continue
+		}
+		if err != nil {
+			log.Fatalf("owlwatch: %v", err)
+		}
+		return
 	}
 }
 
 func run(cfg appConfig) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	var rebootRequested atomic.Bool
 
 	st, err := store.Open(cfg.dbPath)
 	if err != nil {
@@ -143,9 +156,14 @@ func run(cfg appConfig) error {
 		AllowedHosts:   cfg.allowedHosts,
 		Peers:          peersClient,
 		Alerts:         notifier,
-		Token:          cfg.token,
-		MaxSSEClients:  cfg.maxSSEClients,
-		MaxHistory:     cfg.maxHistory,
+		Reboot: func() {
+			if rebootRequested.CompareAndSwap(false, true) {
+				stop()
+			}
+		},
+		Token:         cfg.token,
+		MaxSSEClients: cfg.maxSSEClients,
+		MaxHistory:    cfg.maxHistory,
 	})
 	serveErr := srv.ListenAndServe(ctx)
 
@@ -158,6 +176,9 @@ func run(cfg appConfig) error {
 	}
 	if serveErr != nil {
 		return serveErr
+	}
+	if rebootRequested.Load() {
+		return errRebootRequested
 	}
 	log.Printf("shutdown complete")
 	return nil

@@ -32,6 +32,7 @@ const (
 	defaultStallTimeout     = 45 * time.Second
 	defaultHistoryTimeout   = 15 * time.Second
 	defaultDiskUsageTimeout = 35 * time.Second
+	defaultRebootTimeout    = 10 * time.Second
 
 	// dialTimeout and responseHeaderTimeout bound the connection phases the
 	// stall watchdog cannot see (it only counts response-body bytes): a peer
@@ -510,6 +511,38 @@ func (c *Client) DiskUsage(ctx context.Context, id, path string) (metrics.DiskUs
 		body.Items = []metrics.DiskUsageItem{}
 	}
 	return body, nil
+}
+
+// Reboot asks one peer to gracefully restart its owlwatch process.
+func (c *Client) Reboot(ctx context.Context, id string) error {
+	c.mu.Lock()
+	st, ok := c.states[id]
+	c.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("peers: %q: %w", id, ErrUnknownPeer)
+	}
+	p := st.peer
+
+	ctx, cancel := context.WithTimeout(ctx, defaultRebootTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.URL.String()+"/api/reboot", nil)
+	if err != nil {
+		return fmt.Errorf("peers: %s: building reboot request: %w", id, err)
+	}
+	req.Header.Set("X-Owlwatch-Action", "reboot")
+	if p.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+p.Token)
+	}
+	resp, err := c.httpc.Do(req)
+	if err != nil {
+		return fmt.Errorf("peers: %s: reboot: %v: %w", id, err, ErrPeerUnavailable)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+	if resp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("peers: %s: reboot returned %q: %w", id, resp.Status, ErrPeerUnavailable)
+	}
+	return nil
 }
 
 // rateLogger logs a given message key at most once per interval, so a peer

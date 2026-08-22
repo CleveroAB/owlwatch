@@ -906,9 +906,58 @@ table.data {
 
 .site-footer {
   margin-top: 28px;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   font-size: 12px;
   color: var(--ink-muted);
   text-align: center;
+}
+
+.reboot-control {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+}
+
+.reboot-btn {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border: 1px solid color-mix(in srgb, var(--status-critical) 45%, var(--border));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--status-critical);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reboot-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--status-critical) 9%, transparent);
+  border-color: var(--status-critical);
+}
+
+.reboot-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.reboot-feedback {
+  color: var(--ink-2);
+}
+
+.reboot-error {
+  color: var(--status-critical);
+}
+
+.footer-version {
+  display: block;
 }
 
 
