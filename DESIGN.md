@@ -340,17 +340,25 @@ Everything the UI consumes, in one place: `GET /api/servers`
 `GET /api/servers/{id}/live` (SSE: one `hello`, then `snapshot` per tick),
 `GET /api/servers/{id}/history?range=K` (HistoryResponse), and
 `GET /api/servers/{id}/disk-usage?path=P` (DiskUsage), and
-`GET /api/overview/live` (fleet SSE mux, §9.4). The legacy unprefixed
-`/api/host`, `/api/live`, `/api/history`, `/api/disk-usage` remain as aliases for the local
-server — that alias surface is what hubs consume on peers, so it is frozen.
+`POST /api/servers/{id}/reboot` (graceful server restart), and
+`GET /api/overview/live` (fleet SSE mux, §9.4). The unprefixed
+`/api/host`, `/api/live`, `/api/history`, `/api/disk-usage`, and
+`POST /api/reboot` routes are the local-server surface hubs consume on peers.
 Types exactly as in `web/src/lib/types.ts`.
 
 Email alerting (§3.4) adds `GET /api/alerts` (`{"enabled":bool}` — whether
 this instance has SMTP alerting configured) and `POST /api/alerts/test`
 (sends the hard-coded test email synchronously; `200 {"ok":true}`, `409` when
 alerting is not configured, `502` with `{"error":...}` when the send fails).
-The POST is the API's only mutating route; it sits behind the standard
-`/api/` token gate and host check like everything else.
+The POST sits behind the standard `/api/` token gate and host check like
+everything else.
+
+Server reboot adds `POST /api/servers/{id}/reboot` and the peer-facing
+`POST /api/reboot` alias. A successful request returns
+`202 {"accepted":true}` before the process begins a graceful shutdown and
+starts again. Hub requests are forwarded to the selected peer. Both routes
+require `X-Owlwatch-Action: reboot`, which prevents a cross-origin HTML form
+from triggering a reboot when bearer auth is disabled.
 
 ## 5. Frontend spec
 
@@ -434,6 +442,9 @@ chart and the disk tile) so a mount keeps its hue across range switches.
 - Header: owl emoji or tiny inline SVG mark, hostname in semibold, platform +
   arch as a muted chip, uptime ticking live (computed from `bootTime`),
   connection status, theme toggle button.
+- Footer: centered **Reboot server** destructive-outline button above the
+  version. Confirm before posting; while the process restarts, show
+  “Waiting for the server to reconnect…” and return to idle once SSE is live.
 - **Connection status is a status, not decoration:** green dot + "Live" when
   SSE is open; amber dot + "Reconnecting…" when the authenticated fetch stream
   errors (the client reconnects). Icon + label, never color alone.

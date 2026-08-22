@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Header } from '../components/Header';
 import { HistorySection } from '../components/HistorySection';
 import { RangePicker, RANGE_KEYS } from '../components/RangePicker';
@@ -6,7 +6,7 @@ import { StatTiles } from '../components/StatTiles';
 import { useHistory } from '../hooks/useHistory';
 import { useLive } from '../hooks/useLive';
 import type { Theme } from '../hooks/useTheme';
-import type { ConnectionState } from '../lib/api';
+import { rebootServer, type ConnectionState } from '../lib/api';
 import { formatClock } from '../lib/format';
 import type { RangeKey, ServerSummary } from '../lib/types';
 
@@ -107,7 +107,80 @@ export function ServerPage({
           />
         </section>
       </main>
-      {host?.version && <footer className="site-footer">owlwatch {host.version}</footer>}
+      <footer className="site-footer">
+        <RebootButton id={id} hostname={host?.hostname} status={displayStatus} />
+        {host?.version && <span className="footer-version">owlwatch {host.version}</span>}
+      </footer>
     </div>
+  );
+}
+
+type RebootState = 'idle' | 'rebooting' | 'error';
+
+function RebootButton({
+  id,
+  hostname,
+  status,
+}: {
+  id: string;
+  hostname?: string;
+  status: ConnectionState;
+}) {
+  const [state, setState] = useState<RebootState>('idle');
+  const [error, setError] = useState('');
+  const sawDisconnect = useRef(false);
+
+  useEffect(() => {
+    if (state !== 'rebooting') return;
+    if (status !== 'open') {
+      sawDisconnect.current = true;
+    } else if (sawDisconnect.current) {
+      setState('idle');
+      sawDisconnect.current = false;
+    }
+  }, [state, status]);
+
+  const reboot = async () => {
+    const name = hostname ?? id;
+    if (!window.confirm(`Reboot ${name}? Owlwatch will be unavailable for a few seconds.`)) return;
+
+    setError('');
+    setState('rebooting');
+    sawDisconnect.current = false;
+    try {
+      await rebootServer(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setState('error');
+    }
+  };
+
+  return (
+    <div className="reboot-control">
+      <button
+        type="button"
+        className="reboot-btn"
+        disabled={status !== 'open' || state === 'rebooting'}
+        onClick={() => void reboot()}
+      >
+        <PowerIcon />
+        {state === 'rebooting' ? 'Rebooting…' : 'Reboot server'}
+      </button>
+      {state === 'rebooting' && (
+        <span className="reboot-feedback" role="status">Waiting for the server to reconnect…</span>
+      )}
+      {state === 'error' && (
+        <span className="reboot-feedback reboot-error" role="alert">{error}</span>
+      )}
+    </div>
+  );
+}
+
+function PowerIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+      <path d="M8 1.5v6" />
+      <path d="M4.25 3.7a5.5 5.5 0 1 0 7.5 0" />
+    </svg>
   );
 }

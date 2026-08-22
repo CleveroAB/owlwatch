@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/CleveroAB/owlwatch/internal/alerts"
@@ -30,6 +31,7 @@ type Config struct {
 	AllowedHosts   []string         // OWLWATCH_ALLOWED_HOSTS: extra Host header names accepted by withHostCheck
 	Peers          *peers.Client    // OWLWATCH_PEERS hub state (DESIGN.md §9); nil = standalone
 	Alerts         *alerts.Notifier // email alerting (DESIGN.md §3.4); nil = disabled
+	Reboot         func()           // gracefully restart this owlwatch process; nil = unavailable
 	Token          string           // OWLWATCH_TOKEN: required on /api/ routes when non-empty
 	MaxSSEClients  int              // global concurrent SSE cap
 	MaxHistory     int              // global concurrent history-query cap
@@ -41,6 +43,7 @@ type Server struct {
 	peers   peerSource  // cfg.Peers behind the internal test seam; nil when standalone
 	alerts  alertSender // cfg.Alerts behind the internal test seam; nil when disabled
 	handler http.Handler
+	reboot  sync.Once
 }
 
 // New builds the route table and middleware chain.
@@ -73,10 +76,11 @@ func New(cfg Config) *Server {
 	mux.HandleFunc("GET /api/servers/{id}/host", s.handleServerHost)
 	mux.HandleFunc("GET /api/servers/{id}/history", s.handleServerHistory)
 	mux.HandleFunc("GET /api/servers/{id}/disk-usage", s.handleServerDiskUsage)
+	mux.HandleFunc("POST /api/servers/{id}/reboot", s.handleServerReboot)
 	mux.HandleFunc("GET /api/servers/{id}/live", s.handleServerLive)
 	mux.HandleFunc("GET /api/overview/live", s.handleOverviewLive)
-	// Email alerting (DESIGN.md §3.4). POST /api/alerts/test is the API's
-	// only mutating route; it sits behind the same token gate as the rest.
+	// Email alerting (DESIGN.md §3.4); mutating routes sit behind the same
+	// token gate as the rest of the API.
 	mux.HandleFunc("GET /api/alerts", s.handleAlerts)
 	mux.HandleFunc("POST /api/alerts/test", s.handleAlertsTest)
 	// Legacy aliases for the local server. This surface is frozen: it is
@@ -85,6 +89,7 @@ func New(cfg Config) *Server {
 	mux.HandleFunc("GET /api/live", s.handleLive)
 	mux.HandleFunc("GET /api/history", s.handleHistory)
 	mux.HandleFunc("GET /api/disk-usage", s.handleDiskUsage)
+	mux.HandleFunc("POST /api/reboot", s.handleReboot)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.Handle("/", newUIHandler())
 
