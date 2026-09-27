@@ -113,11 +113,18 @@ Implementation notes:
   per-core (delta since previous call — call once at startup to prime, and
   never pass a non-zero interval, which would sleep). Load via
   `load.Avg()` (returns zeros on platforms without it — fine).
-- **Memory:** read aggregate RAM and swap with `mem`, then rank processes by
-  resident set size. Include only the largest 10 in `MemMetrics.TopProcesses`
-  and refresh that ranking every 10 seconds (with a 2-second timeout) so the
-  normal collector tick stays inexpensive. A process that exits during the
-  walk is skipped.
+- **Memory:** read aggregate RAM and swap with `mem`.
+- **Processes:** one walk of the process table feeds two rankings: the 10
+  busiest processes in `CPUMetrics.TopProcesses` and the 10 largest resident
+  sets in `MemMetrics.TopProcesses`. The walk runs every 10 seconds (with a
+  2-second timeout) so the normal collector tick stays inexpensive; the tick
+  in between reuses the cached rankings. CPU usage is a rate, so each walk
+  compares every process's user+system CPU time with the previous walk's
+  (matched by PID and creation time, so a reused PID never inherits another
+  process's history) and reports the share of total host CPU across all
+  cores, like `usagePct`. Idle processes are omitted. The first walk is only
+  a baseline, so the second follows on the next tick. A process that exits
+  during the walk is skipped.
 - **Disk:** enumerate `disk.Partitions(false)`. Keep only real filesystems
   (allowlist: ext4, ext3, ext2, xfs, btrfs, zfs, apfs, hfs, hfsplus, ntfs,
   fuseblk, vfat, exfat, f2fs). Skip mounts under `/boot/efi`, `/System`,
@@ -324,9 +331,9 @@ Semantics (tests assert these):
   `POST /api/alerts/test`, §4). It is safe to call concurrently with `Run`:
   it touches only immutable config and the stateless mailer, never the rule
   states. In the UI, the header shows an envelope button (top right, before
-  the token/theme buttons) only when `GET /api/alerts` reports
-  `enabled: true` — deployments without SMTP config render pixel-identical
-  to v1. Feedback is a transient chip: `✓ Test email sent` (role=status) or
+  the token/theme buttons) only when `GET /api/actions` reports
+  `testEmail: true` (SMTP alerting and `OWLWATCH_TOKEN` both configured) —
+  every other deployment renders pixel-identical to v1. Feedback is a transient chip: `✓ Test email sent` (role=status) or
   `✕ <server error>` (role=alert, icon + text, never color alone).
 
 ### 3.5 Frontend — see §5 for the full UI spec
@@ -346,19 +353,24 @@ Everything the UI consumes, in one place: `GET /api/servers`
 `POST /api/reboot` routes are the local-server surface hubs consume on peers.
 Types exactly as in `web/src/lib/types.ts`.
 
-Email alerting (§3.4) adds `GET /api/alerts` (`{"enabled":bool}` — whether
-this instance has SMTP alerting configured) and `POST /api/alerts/test`
-(sends the hard-coded test email synchronously; `200 {"ok":true}`, `409` when
-alerting is not configured, `502` with `{"error":...}` when the send fails).
-The POST sits behind the standard `/api/` token gate and host check like
-everything else.
+**Actions.** Every mutating route — `POST /api/alerts/test`,
+`POST /api/servers/{id}/reboot` and `POST /api/reboot` — answers `403` when
+`OWLWATCH_TOKEN` is unset: without a token anyone reaching the port could
+restart the process in a loop or flood the alert recipients. With a token
+they sit behind the standard `/api/` bearer gate, which a cross-origin page
+cannot satisfy, so no separate CSRF guard is needed. `GET /api/actions`
+(`{"restart":bool,"testEmail":bool}`) tells the UI which controls to render.
 
-Server reboot adds `POST /api/servers/{id}/reboot` and the peer-facing
+Email alerting (§3.4) adds `POST /api/alerts/test` (sends the hard-coded test
+email synchronously; `200 {"ok":true}`, `409` when alerting is not
+configured, `502` with `{"error":...}` when the send fails).
+
+Restart adds `POST /api/servers/{id}/reboot` and the peer-facing
 `POST /api/reboot` alias. A successful request returns
 `202 {"accepted":true}` before the process begins a graceful shutdown and
-starts again. Hub requests are forwarded to the selected peer. Both routes
-require `X-Owlwatch-Action: reboot`, which prevents a cross-origin HTML form
-from triggering a reboot when bearer auth is disabled.
+starts again. Hub requests are forwarded to the selected peer; a peer that
+refuses (4xx with `{"error"}`) makes the hub answer `502` with
+`peer refused the restart: <reason>`.
 
 ## 5. Frontend spec
 
@@ -442,8 +454,8 @@ chart and the disk tile) so a mount keeps its hue across range switches.
 - Header: owl emoji or tiny inline SVG mark, hostname in semibold, platform +
   arch as a muted chip, uptime ticking live (computed from `bootTime`),
   connection status, theme toggle button.
-- Footer: centered **Reboot server** destructive-outline button above the
-  version. Confirm before posting; while the process restarts, show
+- Footer: centered **Restart owlwatch** destructive-outline button above the
+  version, rendered only when `GET /api/actions` reports `restart: true`. Confirm before posting; while the process restarts, show
   “Waiting for the server to reconnect…” and return to idle once SSE is live.
 - **Connection status is a status, not decoration:** green dot + "Live" when
   SSE is open; amber dot + "Reconnecting…" when the authenticated fetch stream
@@ -457,7 +469,9 @@ proportional figures) · `sublabel` (secondary ink) · 60-point sparkline (last
 exists.
 
 - **CPU** — value: `37.4%`; sublabel: `12 cores · load 1.24`; sparkline of
-  usagePct; meter of usagePct.
+  usagePct; meter of usagePct. The tile is a button; expanding it spans the
+  grid and shows the 10 processes using the most CPU, with PID and share of
+  total CPU (text + meter), averaged over the last 10 seconds.
 - **Memory** — value: `12.4 GiB`; sublabel: `of 32 GiB · 39%` (+ swap when
   swapUsed > 0); sparkline of usedPct; meter of usedPct. The tile is a button;
   expanding it spans the grid and shows the 10 processes using the most

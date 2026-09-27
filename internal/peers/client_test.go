@@ -771,12 +771,11 @@ func TestRunClosesSubscribersOnCancel(t *testing.T) {
 	cancel2()
 }
 
-func TestRebootPostsAuthenticatedConfirmedRequest(t *testing.T) {
+func TestRebootPostsAuthenticatedRequest(t *testing.T) {
 	type requestInfo struct {
 		method string
 		path   string
 		auth   string
-		action string
 	}
 	requests := make(chan requestInfo, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -784,7 +783,6 @@ func TestRebootPostsAuthenticatedConfirmedRequest(t *testing.T) {
 			method: r.Method,
 			path:   r.URL.Path,
 			auth:   r.Header.Get("Authorization"),
-			action: r.Header.Get("X-Owlwatch-Action"),
 		}
 		w.WriteHeader(http.StatusAccepted)
 	}))
@@ -796,8 +794,8 @@ func TestRebootPostsAuthenticatedConfirmedRequest(t *testing.T) {
 	}
 	got := <-requests
 	if got.method != http.MethodPost || got.path != "/api/reboot" ||
-		got.auth != "Bearer peer-secret" || got.action != "reboot" {
-		t.Fatalf("request = %+v, want authenticated confirmed POST /api/reboot", got)
+		got.auth != "Bearer peer-secret" {
+		t.Fatalf("request = %+v, want authenticated POST /api/reboot", got)
 	}
 }
 
@@ -814,6 +812,17 @@ func TestRebootErrors(t *testing.T) {
 	c = NewClient([]Peer{testPeer(t, "web1", srv.URL, "")})
 	if err := c.Reboot(context.Background(), "web1"); !errors.Is(err, ErrPeerUnavailable) {
 		t.Fatalf("failed reboot error = %v, want ErrPeerUnavailable", err)
+	}
+
+	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"needs a token"}`))
+	}))
+	defer refusing.Close()
+	c = NewClient([]Peer{testPeer(t, "web1", refusing.URL, "")})
+	var refused *RefusedError
+	if err := c.Reboot(context.Background(), "web1"); !errors.As(err, &refused) || refused.Reason != "needs a token" {
+		t.Fatalf("refused reboot error = %v, want RefusedError carrying the peer's reason", err)
 	}
 }
 

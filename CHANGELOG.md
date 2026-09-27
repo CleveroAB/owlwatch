@@ -8,9 +8,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Reboot button at the bottom of each server dashboard. After confirmation it gracefully restarts that Owlwatch process, including remote peers selected through a hub, and reconnects the live dashboard automatically.
+- Press the CPU card to see the ten processes using the most CPU, as a share of total host CPU averaged over the last ten seconds. The same process walk feeds the Memory card, so it adds no extra sampling cost.
+- **Restart owlwatch** button at the bottom of each server dashboard. After confirmation it gracefully restarts that owlwatch process, including remote peers selected through a hub, and reconnects the live dashboard automatically. It restarts owlwatch, not the host.
 - `docker-compose.yml` can now build the image from the checkout: `docker compose up -d --build` compiles frontend and binary from source instead of requiring a published registry image. Pull-based deployment via `OWLWATCH_VERSION` is unchanged.
-- Test-email button in the dashboard header (visible only when email alerting is configured), backed by `GET /api/alerts` and `POST /api/alerts/test` — the API's first mutating route, token-gated like the rest.
+- Test-email button in the dashboard header (visible only when email alerting is configured), backed by `POST /api/alerts/test`.
+- `GET /api/actions` reports which actions (`restart`, `testEmail`) the instance accepts, so the UI only shows controls that will work.
 - Email alerts over plain SMTP (`internal/alerts`): when a metric stays at or above its threshold for a configured duration, owlwatch emails the configured recipients — no new dependencies, stdlib `net/smtp` with opportunistic STARTTLS. Enabled by setting `OWLWATCH_SMTP_HOST`, `OWLWATCH_SMTP_FROM` and `OWLWATCH_ALERT_TO`; thresholds default to CPU 90%, memory 90%, disk 92% (per mount) and GPU 90°C (per card), sustained for `OWLWATCH_ALERT_FOR=5m`, with at most one email per rule per `OWLWATCH_ALERT_COOLDOWN=30m`. Set a threshold to `0` to disable that rule.
 - `OWLWATCH_BIND` selects the host interface docker-compose publishes on. It still defaults to `127.0.0.1`, so reaching the dashboard from another machine is now a documented opt-in rather than a compose-file edit.
 
@@ -18,6 +20,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - The web UI is now built with Bun instead of Node/npm: `web/bun.lock` replaces `web/package-lock.json`, the Docker frontend stage uses `oven/bun:1.4-alpine`, and the Makefile and docs call `bun`. Node is no longer needed to build owlwatch; the runtime image was already Node-free.
 - Dependencies updated: Go builder image `golang:1.27.1-alpine`, `modernc.org/sqlite` 1.59.0, `gopsutil` 4.26.8, React 19.3, Vite 8.3, `@vitejs/plugin-react` 6.1 and Vitest 5.
+
+### Security
+
+- Restarting owlwatch and sending a test email now require `OWLWATCH_TOKEN`: without a token, `POST /api/reboot`, `POST /api/servers/{id}/reboot` and `POST /api/alerts/test` answer `403` and the UI hides their buttons, so an unauthenticated deployment stays read-only. The `X-Owlwatch-Action` confirmation header is gone — the bearer token already stops cross-origin requests. A hub now shows the peer's reason when a peer refuses a restart.
 
 ### Fixed
 
@@ -33,6 +39,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Press the CPU card to see the ten processes using the most CPU, as a share of total host CPU averaged over the last ten seconds. The same process walk feeds the Memory card, so it adds no extra sampling cost.
 - Live CPU, memory, disk, swap, load, and optional NVIDIA GPU telemetry over Server-Sent Events.
 - SQLite-backed history with 1 hour, 6 hour, 24 hour, 7 day, and 30 day ranges.
 - Single embedded React dashboard with dark/light themes, responsive layouts, keyboard-readable charts, and table views.

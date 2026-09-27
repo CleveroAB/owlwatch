@@ -6,17 +6,10 @@ import (
 	"time"
 )
 
-const rebootActionHeader = "X-Owlwatch-Action"
-
-// handleReboot accepts a local process reboot. The custom header makes the
-// mutating endpoint unavailable to cross-origin HTML forms when token auth is
-// disabled; browsers cannot attach it without a CORS preflight, which owlwatch
-// does not permit.
+// handleReboot accepts a local process restart. It is only reachable through
+// requireToken, so the request already carried a valid bearer token — which a
+// cross-origin page cannot attach, making a separate CSRF guard unnecessary.
 func (s *Server) handleReboot(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get(rebootActionHeader) != "reboot" {
-		writeJSONError(w, http.StatusForbidden, "reboot confirmation header is required")
-		return
-	}
 	if s.cfg.Reboot == nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "server reboot is unavailable")
 		return

@@ -11,12 +11,6 @@ type alertSender interface {
 	SendTest() error
 }
 
-// handleAlerts reports whether email alerting is configured, so the UI can
-// decide to render the test button at all.
-func (s *Server) handleAlerts(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{"enabled": s.alerts != nil})
-}
-
 // handleAlertsTest sends the hard-coded test email over the configured SMTP
 // connection. The send is synchronous (bounded by the mailer's connection
 // deadline) so the response reflects the actual delivery attempt.
