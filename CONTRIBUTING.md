@@ -6,7 +6,7 @@ is the architecture contract the code was built against.
 ## Prerequisites
 
 - Go 1.26.5+
-- Node 22+
+- Bun 1.4+
 
 ## Build order matters
 
@@ -15,7 +15,7 @@ any Go build (including `go vet` and `go test`) fails until the UI has been
 built once:
 
 ```sh
-cd web && npm ci && npm run build && cd ..
+cd web && bun install --frozen-lockfile && bun run build && cd ..
 go build ./cmd/owlwatch
 ```
 
@@ -26,7 +26,7 @@ The Makefile handles this ordering for you.
 | Target | What it does |
 |---|---|
 | `make build` | Build the web UI, then the `owlwatch` binary |
-| `make web` | Build only the web UI (`npm ci` + `npm run build`) |
+| `make web` | Build only the web UI (`bun install` + `bun run build`) |
 | `make test` | Web build and unit tests, `go vet`, race-enabled Go tests |
 | `make run` | Build everything and run `./owlwatch` |
 | `make docker` | Build the Docker image as `owlwatch:dev` |
@@ -39,11 +39,11 @@ make test
 ```
 
 Or directly (after a web build): `go vet ./... && go test ./...`. Run the
-frontend unit suite with `npm test --prefix web`; `npm run build --prefix web`
+frontend unit suite with `cd web && bun run test`; `cd web && bun run build`
 also runs the TypeScript type check.
 
 For day-to-day development run `go run ./cmd/owlwatch` in one terminal and
-`cd web && npm run dev` in another — Vite serves on 5173 and proxies `/api`
+`cd web && bun run dev` in another — Vite serves on 5173 and proxies `/api`
 to 8080.
 
 ## Pull requests

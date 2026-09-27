@@ -372,7 +372,7 @@ from triggering a reboot when bearer auth is disabled.
 - `vite.config.ts`: `server.proxy` `/api` → `http://localhost:8080`
   (SSE needs no special flag beyond default; set `changeOrigin: false`).
   Build output `web/dist` (default).
-- `npm run build` must pass (`tsc && vite build`) — it is the frontend
+- `bun run build` must pass (`tsc && vite build`) — it is the frontend
   build gate.
 
 ### 5.2 Design tokens (in `src/styles/tokens.css`, exactly these values)
@@ -564,7 +564,7 @@ localStorage.
 
 Multi-stage `Dockerfile`:
 
-1. `node:22-alpine` — `COPY web/`, `npm ci`, `npm run build`.
+1. `oven/bun:1.4-alpine` — `COPY web/`, `bun install --frozen-lockfile`, `bun run build`.
 2. `golang:1.26.5-alpine` — copy module files + source, copy `web/dist` from
    stage 1 into `web/dist`, `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w
    -X main.version=$VERSION" ./cmd/owlwatch`, and build `./cmd/owlwatch-init`.
@@ -625,10 +625,10 @@ sells and operates it.
 ## 7. Dev workflow
 
 - Backend: `go run ./cmd/owlwatch` on Linux.
-- Frontend: `cd web && npm run dev` → Vite on 5173 proxying `/api` to 8080.
+- Frontend: `cd web && bun run dev` → Vite on 5173 proxying `/api` to 8080.
 - Full build: `make build` (frontend first — `web/dist` is gitignored and
   `go:embed` needs it — then the Go binary); `make run` builds and runs it.
-- Production check: `cd web && npm run build && cd .. && go build ./... && ./owlwatch`.
+- Production check: `cd web && bun run build && cd .. && go build ./... && ./owlwatch`.
 
 ## 8. Non-goals (do not build)
 

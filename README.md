@@ -299,14 +299,14 @@ http://localhost:8080/?theme=light
 
 ## Local development
 
-Requirements: Go 1.26.5+ and Node 22+.
+Requirements: Go 1.26.5+ and Bun 1.4+.
 
 The Go binary embeds the compiled frontend via `go:embed`, and `web/dist` is
 gitignored — so **the frontend must be built before any Go build** or the
 embed directive fails. The Makefile encodes that order:
 
 ```sh
-make build   # npm ci + vite build, then go build → ./owlwatch
+make build   # bun install + vite build, then go build → ./owlwatch
 make run     # make build, then run it on 127.0.0.1:8080
 ```
 
@@ -317,7 +317,7 @@ For UI iteration, run the two dev servers side by side:
 go run ./cmd/owlwatch
 
 # Terminal 2 — frontend dev server on :5173, /api proxied to :8080
-cd web && npm run dev
+cd web && bun run dev
 ```
 
 Iterate on the UI at <http://localhost:5173> with hot reload; the Vite proxy

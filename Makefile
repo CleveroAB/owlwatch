@@ -7,11 +7,11 @@ build: web
 	go build -o owlwatch ./cmd/owlwatch
 
 web:
-	npm ci --prefix web
-	npm run build --prefix web
+	cd web && bun install --frozen-lockfile
+	cd web && bun run build
 
 test: web
-	npm test --prefix web
+	cd web && bun run test
 	go vet ./...
 	go test ./... -race
 
