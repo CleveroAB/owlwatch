@@ -15,11 +15,21 @@ type Snapshot struct {
 }
 
 type CPUMetrics struct {
-	UsagePct float64   `json:"usagePct"` // 0-100, all cores combined
-	PerCore  []float64 `json:"perCore"`  // 0-100 per logical core
-	Load1    float64   `json:"load1"`
-	Load5    float64   `json:"load5"`
-	Load15   float64   `json:"load15"`
+	UsagePct     float64             `json:"usagePct"` // 0-100, all cores combined
+	PerCore      []float64           `json:"perCore"`  // 0-100 per logical core
+	Load1        float64             `json:"load1"`
+	Load5        float64             `json:"load5"`
+	Load15       float64             `json:"load15"`
+	TopProcesses []ProcessCPUMetrics `json:"topProcesses"`
+}
+
+// ProcessCPUMetrics is one process ranked by CPU usage, averaged over the
+// collector's last process-sampling window (about 10 s). Snapshots carry at
+// most ten entries, busiest first; processes that used no CPU are omitted.
+type ProcessCPUMetrics struct {
+	PID      int32   `json:"pid"`
+	Name     string  `json:"name"`
+	UsagePct float64 `json:"usagePct"` // share of total host CPU (all cores), like CPUMetrics.UsagePct
 }
 
 type MemMetrics struct {

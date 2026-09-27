@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Press the CPU card to see the ten processes using the most CPU, as a share of total host CPU averaged over the last ten seconds. The same process walk feeds the Memory card, so it adds no extra sampling cost.
 - **Restart owlwatch** button at the bottom of each server dashboard. After confirmation it gracefully restarts that owlwatch process, including remote peers selected through a hub, and reconnects the live dashboard automatically. It restarts owlwatch, not the host.
 - `docker-compose.yml` can now build the image from the checkout: `docker compose up -d --build` compiles frontend and binary from source instead of requiring a published registry image. Pull-based deployment via `OWLWATCH_VERSION` is unchanged.
 - Test-email button in the dashboard header (visible only when email alerting is configured), backed by `POST /api/alerts/test`.
@@ -37,6 +38,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Press the CPU card to see the ten processes using the most CPU, as a share of total host CPU averaged over the last ten seconds. The same process walk feeds the Memory card, so it adds no extra sampling cost.
 - Live CPU, memory, disk, swap, load, and optional NVIDIA GPU telemetry over Server-Sent Events.
 - SQLite-backed history with 1 hour, 6 hour, 24 hour, 7 day, and 30 day ranges.
 - Single embedded React dashboard with dark/light themes, responsive layouts, keyboard-readable charts, and table views.
