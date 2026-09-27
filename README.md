@@ -73,7 +73,7 @@ proxy at the container instead.
 ### Prebuilt image
 
 No clone needed — images are published to GitHub Container Registry by the
-maintainers. Use `latest` for the newest stable release, pin `1.0`/`1.0.0` in
+maintainers. Use `latest` for the newest stable release, pin `1.1`/`1.1.0` in
 controlled environments, or use `edge` to test the current `main` branch:
 
 ```sh

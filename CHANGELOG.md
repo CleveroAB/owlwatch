@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-27
+
 ### Added
 
 - Press the CPU card to see the ten processes using the most CPU, as a share of total host CPU averaged over the last ten seconds. The same process walk feeds the Memory card, so it adds no extra sampling cost.
@@ -52,5 +54,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Added explicit exposure guidance, private vulnerability reporting, and browser security headers.
 
-[Unreleased]: https://github.com/CleveroAB/owlwatch/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/CleveroAB/owlwatch/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/CleveroAB/owlwatch/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/CleveroAB/owlwatch/releases/tag/v1.0.0
