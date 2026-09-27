@@ -15,11 +15,21 @@ import (
 	"strings"
 )
 
-// Sentinel errors returned (wrapped — test with errors.Is) by Client.History.
+// Sentinel errors returned (wrapped — test with errors.Is) by the Client's
+// request methods.
 var (
 	ErrUnknownPeer     = errors.New("unknown peer")
 	ErrPeerUnavailable = errors.New("peer unavailable")
 )
+
+// RefusedError means the peer answered but declined the action, e.g. a
+// restart on a peer without OWLWATCH_TOKEN. Reason is the peer's own
+// explanation, fit to show a viewer.
+type RefusedError struct {
+	Reason string
+}
+
+func (e *RefusedError) Error() string { return "peer refused: " + e.Reason }
 
 // Peer is one federation upstream parsed from OWLWATCH_PEERS.
 type Peer struct {

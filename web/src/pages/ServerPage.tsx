@@ -3,6 +3,7 @@ import { Header } from '../components/Header';
 import { HistorySection } from '../components/HistorySection';
 import { RangePicker, RANGE_KEYS } from '../components/RangePicker';
 import { StatTiles } from '../components/StatTiles';
+import { useActions } from '../hooks/useActions';
 import { useHistory } from '../hooks/useHistory';
 import { useLive } from '../hooks/useLive';
 import type { Theme } from '../hooks/useTheme';
@@ -45,6 +46,7 @@ export function ServerPage({
   const { status, host, latest, buffer, online, lastSeen } = useLive(id);
   const [range, setRange] = useState<RangeKey>(initialRange);
   const history = useHistory(id, range);
+  const actions = useActions();
 
   const changeRange = useCallback((r: RangeKey) => {
     setRange(r);
@@ -108,7 +110,7 @@ export function ServerPage({
         </section>
       </main>
       <footer className="site-footer">
-        <RebootButton id={id} hostname={host?.hostname} status={displayStatus} />
+        {actions.restart && <RebootButton id={id} hostname={host?.hostname} status={displayStatus} />}
         {host?.version && <span className="footer-version">owlwatch {host.version}</span>}
       </footer>
     </div>
@@ -142,7 +144,7 @@ function RebootButton({
 
   const reboot = async () => {
     const name = hostname ?? id;
-    if (!window.confirm(`Reboot ${name}? Owlwatch will be unavailable for a few seconds.`)) return;
+    if (!window.confirm(`Restart owlwatch on ${name}? The dashboard will be unavailable for a few seconds.`)) return;
 
     setError('');
     setState('rebooting');
@@ -164,7 +166,7 @@ function RebootButton({
         onClick={() => void reboot()}
       >
         <PowerIcon />
-        {state === 'rebooting' ? 'Rebooting…' : 'Reboot server'}
+        {state === 'rebooting' ? 'Restarting…' : 'Restart owlwatch'}
       </button>
       {state === 'rebooting' && (
         <span className="reboot-feedback" role="status">Waiting for the server to reconnect…</span>

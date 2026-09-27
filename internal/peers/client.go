@@ -513,7 +513,9 @@ func (c *Client) DiskUsage(ctx context.Context, id, path string) (metrics.DiskUs
 	return body, nil
 }
 
-// Reboot asks one peer to gracefully restart its owlwatch process.
+// Reboot asks one peer to gracefully restart its owlwatch process. A peer
+// that answers 4xx declined the restart; its reason comes back as a
+// *RefusedError so the hub can show the viewer why.
 func (c *Client) Reboot(ctx context.Context, id string) error {
 	c.mu.Lock()
 	st, ok := c.states[id]
@@ -529,7 +531,6 @@ func (c *Client) Reboot(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("peers: %s: building reboot request: %w", id, err)
 	}
-	req.Header.Set("X-Owlwatch-Action", "reboot")
 	if p.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+p.Token)
 	}
@@ -538,11 +539,20 @@ func (c *Client) Reboot(ctx context.Context, id string) error {
 		return fmt.Errorf("peers: %s: reboot: %v: %w", id, err, ErrPeerUnavailable)
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
-	if resp.StatusCode != http.StatusAccepted {
+	var body struct {
+		Error string `json:"error"`
+	}
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 4<<10)).Decode(&body)
+	switch {
+	case resp.StatusCode == http.StatusAccepted:
+		return nil
+	case resp.StatusCode >= 400 && resp.StatusCode < 500 && body.Error != "":
+		return &RefusedError{Reason: body.Error}
+	case resp.StatusCode == http.StatusUnauthorized:
+		return &RefusedError{Reason: "the hub's token for this peer was rejected"}
+	default:
 		return fmt.Errorf("peers: %s: reboot returned %q: %w", id, resp.Status, ErrPeerUnavailable)
 	}
-	return nil
 }
 
 // rateLogger logs a given message key at most once per interval, so a peer
