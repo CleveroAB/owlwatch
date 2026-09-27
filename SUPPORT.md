@@ -14,7 +14,7 @@ Include your owlwatch version, host OS and architecture, deployment method, rele
 
 ## Bugs
 
-Use the [bug report form](https://github.com/CleveroAB/owlwatch/issues/new?template=bug_report.yml) for reproducible defects. Please keep feature requests in their dedicated form.
+[Open an issue](https://github.com/CleveroAB/owlwatch/issues/new) for reproducible defects or feature requests, with the details listed above and the steps to reproduce.
 
 ## Security issues
 
