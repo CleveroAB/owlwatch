@@ -2,7 +2,16 @@ import { useEffect, useId, useState, type ReactNode } from 'react';
 import { fetchDiskUsage, serverBase } from '../lib/api';
 import { mountColor, registerMounts } from '../lib/diskSlots';
 import { formatBytes, formatBytesTick, formatGiBPair, formatPct, truncateMountPath } from '../lib/format';
-import type { DiskMetrics, DiskUsage, HostInfo, MemMetrics, ProcessMemoryMetrics, Snapshot } from '../lib/types';
+import type {
+  CPUMetrics,
+  DiskMetrics,
+  DiskUsage,
+  HostInfo,
+  MemMetrics,
+  ProcessCPUMetrics,
+  ProcessMemoryMetrics,
+  Snapshot,
+} from '../lib/types';
 import { Meter, meterFlag, type MeterFlag } from './Meter';
 import { Sparkline } from './Sparkline';
 
@@ -99,6 +108,7 @@ function StatTile({
 }
 
 function CpuTile({ host, latest, buffer }: Omit<TilesProps, 'serverId'>) {
+  const [expanded, setExpanded] = useState(false);
   const cpu = latest?.cpu ?? null;
   const pct = cpu?.usagePct ?? 0;
   const cores = host?.cpuCores ?? cpu?.perCore.length ?? 0;
@@ -108,10 +118,56 @@ function CpuTile({ host, latest, buffer }: Omit<TilesProps, 'serverId'>) {
       value={cpu ? formatPct(pct) : '—'}
       sub={cpu ? `${cores} cores · load ${cpu.load1.toFixed(2)}` : WAITING}
       flag={cpu ? meterFlag(pct) : null}
+      expanded={expanded}
+      onToggle={() => setExpanded((open) => !open)}
+      details={<CpuDetails cpu={cpu} />}
     >
       <Sparkline values={buffer.map((s) => s.cpu.usagePct)} color="var(--series-1)" />
       <Meter pct={cpu ? pct : 0} hue="var(--series-1)" />
     </StatTile>
+  );
+}
+
+function CpuDetails({ cpu }: { cpu: CPUMetrics | null }) {
+  const processes = topCpuProcesses(cpu);
+  return (
+    <>
+      <h2>Top CPU processes</h2>
+      {processes.length === 0 ? (
+        <p className="resource-empty">
+          {cpu?.topProcesses ? 'Measuring process CPU usage…' : 'Process details unavailable.'}
+        </p>
+      ) : (
+        <>
+          <div className="resource-table-wrap">
+            <table className="resource-table">
+              <thead>
+                <tr>
+                  <th scope="col">Process</th>
+                  <th scope="col">PID</th>
+                  <th scope="col">Share of total CPU</th>
+                </tr>
+              </thead>
+              <tbody>
+                {processes.map((process) => (
+                  <tr key={process.pid}>
+                    <td title={process.name}>{process.name}</td>
+                    <td>{process.pid}</td>
+                    <td>
+                      <div className="resource-share">
+                        <span>{formatPct(process.usagePct)}</span>
+                        <Meter pct={process.usagePct} hue="var(--series-1)" />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="disk-scan-summary">Averaged over the last 10 seconds, across all cores.</p>
+        </>
+      )}
+    </>
   );
 }
 
@@ -361,6 +417,12 @@ export function parentDiskPath(path: string, mount: string): string {
   const slash = trimmed.lastIndexOf('/');
   const parent = slash <= 0 ? '/' : trimmed.slice(0, slash);
   return parent.length < mount.length ? mount : parent;
+}
+
+export function topCpuProcesses(cpu: CPUMetrics | null, limit = 10): ProcessCPUMetrics[] {
+  return [...(cpu?.topProcesses ?? [])]
+    .sort((a, b) => b.usagePct - a.usagePct || a.pid - b.pid)
+    .slice(0, limit);
 }
 
 export function topMemoryProcesses(mem: MemMetrics | null, limit = 10): ProcessMemoryMetrics[] {

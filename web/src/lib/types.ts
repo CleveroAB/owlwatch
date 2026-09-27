@@ -19,6 +19,13 @@ export interface CPUMetrics {
   load1: number;
   load5: number;
   load15: number;
+  topProcesses?: ProcessCPUMetrics[]; // at most 10, busiest first; idle processes omitted
+}
+
+export interface ProcessCPUMetrics {
+  pid: number;
+  name: string;
+  usagePct: number; // share of total host CPU (all cores), averaged over ~10 s
 }
 
 export interface MemMetrics {

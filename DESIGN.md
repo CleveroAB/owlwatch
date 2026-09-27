@@ -113,11 +113,18 @@ Implementation notes:
   per-core (delta since previous call — call once at startup to prime, and
   never pass a non-zero interval, which would sleep). Load via
   `load.Avg()` (returns zeros on platforms without it — fine).
-- **Memory:** read aggregate RAM and swap with `mem`, then rank processes by
-  resident set size. Include only the largest 10 in `MemMetrics.TopProcesses`
-  and refresh that ranking every 10 seconds (with a 2-second timeout) so the
-  normal collector tick stays inexpensive. A process that exits during the
-  walk is skipped.
+- **Memory:** read aggregate RAM and swap with `mem`.
+- **Processes:** one walk of the process table feeds two rankings: the 10
+  busiest processes in `CPUMetrics.TopProcesses` and the 10 largest resident
+  sets in `MemMetrics.TopProcesses`. The walk runs every 10 seconds (with a
+  2-second timeout) so the normal collector tick stays inexpensive; the tick
+  in between reuses the cached rankings. CPU usage is a rate, so each walk
+  compares every process's user+system CPU time with the previous walk's
+  (matched by PID and creation time, so a reused PID never inherits another
+  process's history) and reports the share of total host CPU across all
+  cores, like `usagePct`. Idle processes are omitted. The first walk is only
+  a baseline, so the second follows on the next tick. A process that exits
+  during the walk is skipped.
 - **Disk:** enumerate `disk.Partitions(false)`. Keep only real filesystems
   (allowlist: ext4, ext3, ext2, xfs, btrfs, zfs, apfs, hfs, hfsplus, ntfs,
   fuseblk, vfat, exfat, f2fs). Skip mounts under `/boot/efi`, `/System`,
@@ -462,7 +469,9 @@ proportional figures) · `sublabel` (secondary ink) · 60-point sparkline (last
 exists.
 
 - **CPU** — value: `37.4%`; sublabel: `12 cores · load 1.24`; sparkline of
-  usagePct; meter of usagePct.
+  usagePct; meter of usagePct. The tile is a button; expanding it spans the
+  grid and shows the 10 processes using the most CPU, with PID and share of
+  total CPU (text + meter), averaged over the last 10 seconds.
 - **Memory** — value: `12.4 GiB`; sublabel: `of 32 GiB · 39%` (+ swap when
   swapUsed > 0); sparkline of usedPct; meter of usedPct. The tile is a button;
   expanding it spans the grid and shows the 10 processes using the most

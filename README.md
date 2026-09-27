@@ -13,8 +13,9 @@ to 30 days). No agents, no external database, no config files.
 *Dark is the default theme; here is the same dashboard in the
 [light theme](docs/screenshot-light.png).*
 
-Press the Memory or Disk card to expand it. Memory shows the ten processes
-using the most resident RAM. Disk scans the selected filesystem on demand and
+Press the CPU, Memory or Disk card to expand it. CPU shows the ten processes
+using the most CPU over the last ten seconds, and Memory the ten using the
+most resident RAM. Disk scans the selected filesystem on demand and
 shows the ten files or directories consuming the most allocated space; select
 a directory to drill down and find the specific logs, databases, archives, or
 other contents responsible.
