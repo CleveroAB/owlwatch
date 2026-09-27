@@ -3,18 +3,18 @@
 # ---- Stage 1: frontend ------------------------------------------------------
 # Runs on the build host's native platform (fast under emulation-free buildx);
 # its output (web/dist) is platform-independent.
-FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
+FROM --platform=$BUILDPLATFORM oven/bun:1.4-alpine AS frontend
 WORKDIR /app/web
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
+COPY web/package.json web/bun.lock ./
+RUN bun install --frozen-lockfile
 COPY web/ ./
-RUN npm run build
+RUN bun run build
 
 # ---- Stage 2: backend -------------------------------------------------------
 # Also runs on the build host's platform and cross-compiles to the target:
 # Go cross-compilation (CGO_ENABLED=0) is much faster than emulating the
 # compiler under QEMU for multi-arch builds.
-FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
