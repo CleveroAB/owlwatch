@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   connectOverview,
   fetchDiskUsage,
-  fetchAlertsInfo,
+  fetchActions,
   fetchServers,
   onUnauthorized,
   rebootServer,
@@ -192,9 +192,9 @@ describe('email alerts API', () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
-  it('parses the enabled flag', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => respond(200, '{"enabled":true}')));
-    await expect(fetchAlertsInfo()).resolves.toEqual({ enabled: true });
+  it('parses the available actions', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => respond(200, '{"restart":true,"testEmail":false}')));
+    await expect(fetchActions()).resolves.toEqual({ restart: true, testEmail: false });
   });
 });
 
@@ -205,7 +205,7 @@ describe('server reboot API', () => {
     vi.unstubAllGlobals();
   });
 
-  it('posts the confirmation header and bearer token to the scoped server', async () => {
+  it('posts the bearer token to the scoped server', async () => {
     setToken('reboot-secret');
     const fetchMock = vi.fn(async () => respond(202, '{"accepted":true}'));
     vi.stubGlobal('fetch', fetchMock);
@@ -214,10 +214,7 @@ describe('server reboot API', () => {
     const [path, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(path).toBe('/api/servers/Web%20One/reboot');
     expect(init.method).toBe('POST');
-    expect(init.headers).toMatchObject({
-      Authorization: 'Bearer reboot-secret',
-      'X-Owlwatch-Action': 'reboot',
-    });
+    expect(init.headers).toEqual({ Authorization: 'Bearer reboot-secret' });
   });
 
   it('surfaces the server error', async () => {

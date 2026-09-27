@@ -1,7 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import {
   clearToken,
-  fetchAlertsInfo,
   getToken,
   sendTestAlertEmail,
   type ConnectionState,
@@ -9,6 +8,7 @@ import {
 import { formatUptime } from '../lib/format';
 import type { HostInfo, ServerSummary } from '../lib/types';
 import type { Theme } from '../hooks/useTheme';
+import { useActions } from '../hooks/useActions';
 
 /** Hub-mode extras for a server page: back link + server switcher (§9.5). */
 export interface HubNav {
@@ -124,28 +124,23 @@ const TEST_EMAIL_FEEDBACK_MS = 6000;
 
 /**
  * "Send test email" button (DESIGN.md §3.4). Rendered only when the instance
- * serving the UI has email alerting configured — /api/alerts says so — which
- * keeps the header pixel-identical to v1 on every other deployment.
+ * serving the UI has email alerting and OWLWATCH_TOKEN configured —
+ * /api/actions says so — which keeps the header pixel-identical to v1 on
+ * every other deployment.
  */
 function TestEmailButton() {
-  const [enabled, setEnabled] = useState(false);
+  const { testEmail } = useActions();
   const [state, setState] = useState<TestEmailState>({ phase: 'idle' });
   const resetTimer = useRef<number | null>(null);
 
-  useEffect(() => {
-    const ctrl = new AbortController();
-    fetchAlertsInfo(ctrl.signal)
-      .then((info) => setEnabled(info.enabled))
-      .catch(() => {
-        /* status unknown (offline, 401, old server) — keep the button hidden */
-      });
-    return () => {
-      ctrl.abort();
+  useEffect(
+    () => () => {
       if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
-    };
-  }, []);
+    },
+    [],
+  );
 
-  if (!enabled) return null;
+  if (!testEmail) return null;
 
   const send = () => {
     if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);

@@ -237,14 +237,13 @@ func (s *Server) handleServerReboot(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotFound, "unknown server")
 		return
 	}
-	if r.Header.Get(rebootActionHeader) != "reboot" {
-		writeJSONError(w, http.StatusForbidden, "reboot confirmation header is required")
-		return
-	}
 	if err := s.peers.Reboot(r.Context(), id); err != nil {
+		var refused *peers.RefusedError
 		switch {
 		case errors.Is(err, peers.ErrUnknownPeer):
 			writeJSONError(w, http.StatusNotFound, "unknown server")
+		case errors.As(err, &refused):
+			writeJSONError(w, http.StatusBadGateway, "peer refused the restart: "+refused.Reason)
 		case errors.Is(err, peers.ErrPeerUnavailable):
 			writeJSONError(w, http.StatusBadGateway, "peer unreachable")
 		default:

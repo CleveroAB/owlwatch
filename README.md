@@ -29,8 +29,10 @@ other contents responsible.
 > dashboard shows; with one, the token still travels in plain text. Run it on
 > a trusted LAN, over a VPN such as Tailscale, or behind a reverse proxy that
 > terminates TLS (nginx or Caddy work fine). Do not expose it directly to the
-> internet. It is read-only — metrics out, nothing in — but treat host
-> telemetry as sensitive anyway.
+> internet. Treat host telemetry as sensitive. Without a token owlwatch is
+> strictly read-only: the two actions that change something — restarting
+> owlwatch and sending a test email — are refused unless `OWLWATCH_TOKEN` is
+> set.
 
 For an internet-reachable deployment, generate a strong token with
 `openssl rand -base64 32`, then follow the tested [Caddy, nginx, or Tailscale
@@ -227,7 +229,7 @@ Everything is environment variables; the defaults are sensible.
 | `OWLWATCH_ROOTFS` | *(empty)* | container mode: path where the host `/` is bind-mounted (e.g. `/host/rootfs`); empty = native mode |
 | `OWLWATCH_ALLOWED_HOSTS` | *(empty)* | extra Host-header names to accept (comma-separated). IP-literal hosts and `localhost` are always accepted; other names are rejected with 421 to block DNS rebinding |
 | `OWLWATCH_PEERS` | *(empty)* | comma-separated `name=url\|token` pairs, e.g. `web1=https://web1.example.com\|WEB1_TOKEN`. Each token authenticates the hub to that peer; setting this makes the instance a [hub](#monitoring-multiple-servers-federation) |
-| `OWLWATCH_TOKEN` | *(empty)* | every `/api/*` route requires `Authorization: Bearer` when set (`/healthz` stays open); minimum 16 characters. Also used as the fallback outgoing peer token when an entry omits its own token |
+| `OWLWATCH_TOKEN` | *(empty)* | every `/api/*` route requires `Authorization: Bearer` when set (`/healthz` stays open); minimum 16 characters. Required for the restart and test-email actions, which are refused without it. Also used as the fallback outgoing peer token when an entry omits its own token |
 | `OWLWATCH_MAX_SSE_CLIENTS` | `128` | maximum concurrent live-stream clients |
 | `OWLWATCH_MAX_HISTORY_REQUESTS` | `16` | maximum concurrent history requests |
 | `OWLWATCH_SMTP_HOST` | *(empty)* | SMTP server for [email alerts](#email-alerts); alerting is enabled when this, `OWLWATCH_SMTP_FROM` and `OWLWATCH_ALERT_TO` are all set |
@@ -270,21 +272,22 @@ and since when.
 To check your SMTP settings end to end, use the envelope button in the top
 right of the dashboard header — it sends a test email to the configured
 recipients and shows whether delivery succeeded. The button only appears
-when alerting is configured (`POST /api/alerts/test` does the same thing
-from the command line).
+when alerting and `OWLWATCH_TOKEN` are both configured
+(`POST /api/alerts/test` does the same thing from the command line).
 
 Each instance alerts on its own metrics. In a [federated](#monitoring-multiple-servers-federation)
 setup, give every peer its own SMTP settings — the hub does not alert on
 behalf of peers.
 
-### Rebooting Owlwatch
+### Restarting owlwatch
 
-The bottom of each server dashboard has a **Reboot server** button. After a
-confirmation, Owlwatch closes its live streams and SQLite store cleanly,
-starts the monitoring process again, and the dashboard reconnects
-automatically. On a hub, the action is forwarded to the server whose dashboard
-is open. This restarts Owlwatch itself; it does not reboot the host operating
-system.
+When `OWLWATCH_TOKEN` is set, the bottom of each server dashboard has a
+**Restart owlwatch** button. After a confirmation, owlwatch closes its live
+streams and SQLite store cleanly, starts the monitoring process again, and
+the dashboard reconnects automatically. On a hub, the action is forwarded to
+the server whose dashboard is open; that peer must have its own
+`OWLWATCH_TOKEN` too, or it refuses and the dashboard shows why. This
+restarts owlwatch itself; it does not reboot the host operating system.
 
 ### URL parameters
 
@@ -340,11 +343,11 @@ with an `Authorization: Bearer` header — `/healthz` never does.
 | `GET /api/servers/{id}/live` | SSE stream — one `hello` event on connect (`{host, recent, intervalMs}` with the last ~5 min of samples and the sample interval), then a `snapshot` event per sample (every 2 s by default); comment heartbeat every 15 s |
 | `GET /api/servers/{id}/history?range=1h\|6h\|24h\|7d\|30d` | `{range, points}` — server-side bucketed aggregates (≤ ~400 points per response); proxied from the peer for peer ids. Unknown range → `400`, unknown id → `404`, unreachable peer → `502` |
 | `GET /api/servers/{id}/disk-usage?path=/var` | on-demand recursive size breakdown of the ten largest immediate files/directories under an absolute path; directories can be queried again to drill down. Scans stay within a reported disk, do not cross mounts, and are bounded/cached |
-| `POST /api/servers/{id}/reboot` | gracefully restarts the selected Owlwatch server and returns `202 {"accepted":true}`; requires `X-Owlwatch-Action: reboot`, and is proxied to peers by a hub |
+| `POST /api/servers/{id}/reboot` | gracefully restarts the selected owlwatch server and returns `202 {"accepted":true}`; `403` when `OWLWATCH_TOKEN` is unset. Proxied to peers by a hub, which answers `502` with the peer's reason when the peer refuses |
 | `GET /api/overview/live` | SSE stream for the whole fleet — a `servers` event on connect (full `ServerSummary[]`), then `snapshot` events (`{id, snapshot}`) for every server and `status` events (`{id, online, lastSeen}`) on peer transitions |
 | `GET /healthz` | `200 ok` while the latest sample is fresh (within 5× the sample interval), `503` before the first sample or when sampling has stalled; drives the Docker `HEALTHCHECK` |
-| `GET /api/alerts` | `{"enabled": bool}` — whether this instance has [email alerts](#email-alerts) configured |
-| `POST /api/alerts/test` | sends the test alert email to the configured recipients: `200 {"ok":true}`, `409` when alerting is not configured, `502` with the SMTP error when the send fails |
+| `GET /api/actions` | `{"restart": bool, "testEmail": bool}` — which actions this instance accepts. Both need `OWLWATCH_TOKEN`; `testEmail` also needs [email alerts](#email-alerts) configured |
+| `POST /api/alerts/test` | sends the test alert email to the configured recipients: `200 {"ok":true}`, `403` when `OWLWATCH_TOKEN` is unset, `409` when alerting is not configured, `502` with the SMTP error when the send fails |
 
 The unprefixed peer endpoints — `GET /api/host`, `GET /api/live`,
 `GET /api/history`, `GET /api/disk-usage`, `POST /api/reboot` — remain as aliases for the local server. That alias

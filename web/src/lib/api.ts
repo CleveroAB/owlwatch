@@ -366,15 +366,19 @@ export async function fetchServers(signal?: AbortSignal): Promise<ServerSummary[
   return apiGet<ServerSummary[]>('/api/servers', signal);
 }
 
-/* ---------- email alerts (DESIGN.md §3.4) ---------- */
+/* ---------- actions: restart + test email ---------- */
 
-/** Whether the instance serving the UI has email alerting configured. */
-export interface AlertsInfo {
-  enabled: boolean;
+/**
+ * Which mutating controls the instance serving the UI accepts. Both are off
+ * unless it runs with OWLWATCH_TOKEN; testEmail also needs SMTP alerting.
+ */
+export interface Actions {
+  restart: boolean;
+  testEmail: boolean;
 }
 
-export async function fetchAlertsInfo(signal?: AbortSignal): Promise<AlertsInfo> {
-  return apiGet<AlertsInfo>('/api/alerts', signal);
+export async function fetchActions(signal?: AbortSignal): Promise<Actions> {
+  return apiGet<Actions>('/api/actions', signal);
 }
 
 /**
@@ -399,10 +403,7 @@ export async function sendTestAlertEmail(): Promise<void> {
 export async function rebootServer(id: string): Promise<void> {
   const path = `${serverBase(id)}/reboot`;
   const token = getToken();
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: authHeaders({ 'X-Owlwatch-Action': 'reboot' }),
-  });
+  const res = await fetch(path, { method: 'POST', headers: authHeaders() });
   if (res.status === 401) {
     reportUnauthorized(token);
     throw new UnauthorizedError(path);

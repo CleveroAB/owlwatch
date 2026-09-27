@@ -76,20 +76,20 @@ func New(cfg Config) *Server {
 	mux.HandleFunc("GET /api/servers/{id}/host", s.handleServerHost)
 	mux.HandleFunc("GET /api/servers/{id}/history", s.handleServerHistory)
 	mux.HandleFunc("GET /api/servers/{id}/disk-usage", s.handleServerDiskUsage)
-	mux.HandleFunc("POST /api/servers/{id}/reboot", s.handleServerReboot)
+	mux.HandleFunc("POST /api/servers/{id}/reboot", s.requireToken(s.handleServerReboot))
 	mux.HandleFunc("GET /api/servers/{id}/live", s.handleServerLive)
 	mux.HandleFunc("GET /api/overview/live", s.handleOverviewLive)
-	// Email alerting (DESIGN.md §3.4); mutating routes sit behind the same
-	// token gate as the rest of the API.
-	mux.HandleFunc("GET /api/alerts", s.handleAlerts)
-	mux.HandleFunc("POST /api/alerts/test", s.handleAlertsTest)
+	// Mutating routes are refused outright when OWLWATCH_TOKEN is unset
+	// (requireToken); /api/actions tells the UI which of them are available.
+	mux.HandleFunc("GET /api/actions", s.handleActions)
+	mux.HandleFunc("POST /api/alerts/test", s.requireToken(s.handleAlertsTest))
 	// Legacy aliases for the local server. This surface is frozen: it is
 	// what a hub consumes on its peers (DESIGN.md §4).
 	mux.HandleFunc("GET /api/host", s.handleHost)
 	mux.HandleFunc("GET /api/live", s.handleLive)
 	mux.HandleFunc("GET /api/history", s.handleHistory)
 	mux.HandleFunc("GET /api/disk-usage", s.handleDiskUsage)
-	mux.HandleFunc("POST /api/reboot", s.handleReboot)
+	mux.HandleFunc("POST /api/reboot", s.requireToken(s.handleReboot))
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.Handle("/", newUIHandler())
 
